@@ -1,9 +1,14 @@
 Feature: Login API with valid credentials
 
-Scenario: Login with valid credentials
-    Given url 'TODO_ENDPOINT_URL'
-    And request { TODO_REQUEST_BODY }
-    When method TODO_HTTP_METHOD
+  Scenario: Successful login
+    # TODO: set the API endpoint URL
+    Given url "TODO_API_ENDPOINT_URL"
+    And request
+    """
+    TODO_REQUEST_PAYLOAD_FORMAT
+    """
+    When method post
     Then status 200
-    # TODO: Add response schema validation
-
+    # TODO: validate response structure and authentication information
+    # Example: assert response contains token
+    # * match response == { token: '#string' }

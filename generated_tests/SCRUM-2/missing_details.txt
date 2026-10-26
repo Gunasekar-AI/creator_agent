@@ -1,11 +1,10 @@
-Login page URL not specified
-Username field selector not specified
-Password field selector not specified
-Login button selector not specified
-Error message text not specified
-Logout button selector not specified
-Logout redirect URL not specified
-API endpoint URL not specified
-HTTP method not specified
-Request payload format not specified
-Response schema not specified
+Login page URL
+Valid username and password values
+Invalid username and password values
+Exact error message text
+Logout button selector
+Login page URL after logout
+API endpoint URL
+Request payload format
+Valid credentials values
+Structure of successful response
