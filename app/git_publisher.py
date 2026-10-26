@@ -1,6 +1,5 @@
 
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -29,13 +28,12 @@ def run_command(args, cwd, check=True):
 
 def run_git(*args, cwd):
     """Run a Git command and return its output."""
-    result = run_command(["git", *args], cwd=cwd)
-    return result.stdout.strip()
+    return run_command(["git", *args], cwd=cwd).stdout.strip()
 
 
 def make_branch_name(issue_key, labels):
     """Build a safe branch name from the Jira key and first label."""
-    name = issue_key
+    name = str(issue_key)
 
     if isinstance(labels, str):
         labels = [labels]
@@ -43,7 +41,7 @@ def make_branch_name(issue_key, labels):
     if labels:
         label = str(labels[0]).strip()
         if label:
-            name = f"{issue_key}-{label}"
+            name = f"{name}-{label}"
 
     name = name.lower()
     name = re.sub(r"[^a-z0-9._/-]+", "-", name)
@@ -51,7 +49,7 @@ def make_branch_name(issue_key, labels):
     name = name.strip("-./")
 
     if not name:
-        raise ValueError("Could not create a valid Git branch name")
+        raise ValueError("Could not create a valid Git branch name.")
 
     return name
 
@@ -60,7 +58,7 @@ def ensure_github_cli(repo):
     """Verify that GitHub CLI is installed and authenticated."""
     if not shutil.which("gh"):
         raise RuntimeError(
-            "GitHub CLI (gh) is not installed or is not on PATH. "
+            "GitHub CLI (gh) is not installed or not on PATH. "
             "Install it and run 'gh auth login'."
         )
 
@@ -84,8 +82,12 @@ def create_or_reuse_pr(repo, branch, base_branch, issue_key, summary):
     if prs:
         return prs[0]["url"]
 
-    title_summary = summary.strip() if summary else "Generated test automation"
+    title_summary = (
+        summary.strip() if isinstance(summary, str) and summary.strip()
+        else "Generated test automation"
+    )
     title = f"{issue_key}: {title_summary}"
+
     body = (
         f"Automated test generation for Jira issue {issue_key}.\n\n"
         "Please review the generated UI/API tests and replace any "
@@ -106,6 +108,36 @@ def create_or_reuse_pr(repo, branch, base_branch, issue_key, summary):
     return created.stdout.strip()
 
 
+def get_changed_paths(repo):
+    """Return paths changed in the working tree or index."""
+    result = run_git(
+        "status", "--porcelain", "--untracked-files=all", cwd=repo
+    )
+
+    paths = []
+
+    for line in result.splitlines():
+        if len(line) < 4:
+            continue
+
+        # Git porcelain status may include rename records.
+        path_text = line[3:].strip()
+
+        if " -> " in path_text:
+            path_text = path_text.split(" -> ", 1)[1]
+
+        # Porcelain output quotes unusual filenames. This project uses
+        # ordinary generated filenames, so normal paths are sufficient.
+        paths.append(path_text.replace("\\", "/"))
+
+    return paths
+
+
+def path_is_inside(path, directory):
+    """Check whether a changed path is the directory or one of its files."""
+    return path == directory or path.startswith(directory.rstrip("/") + "/")
+
+
 def publish_generated_tests(
     issue_key,
     labels,
@@ -115,11 +147,11 @@ def publish_generated_tests(
     summary="",
 ):
     """
-    Preserve generated files, switch to the Jira branch, commit and push
-    the files, and create or reuse a GitHub pull request.
+    Publish generated test files to a Jira-specific branch.
 
-    Generated output is backed up outside the repository before changing
-    branches. This avoids using 'git stash pop' on generated files.
+    Generated files inside output_dir are snapshotted before branch changes.
+    Only that generated directory may contain working-tree changes. Changes
+    elsewhere in the repository are preserved and cause publication to stop.
     """
     repo = Path(repo_dir or Path.cwd()).resolve()
     output = Path(output_dir).resolve()
@@ -134,103 +166,97 @@ def publish_generated_tests(
         relative_output = output.relative_to(repo).as_posix()
     except ValueError as exc:
         raise RuntimeError(
-            "Generated output directory must be inside the repository"
+            "Generated output directory must be inside the repository."
         ) from exc
 
     if relative_output in ("", "."):
-        raise RuntimeError("Refusing to publish the repository root")
+        raise RuntimeError("Refusing to publish the repository root.")
 
     branch = make_branch_name(issue_key, labels)
 
-    # Check GitHub authentication before making repository changes.
+    # Verify GitHub CLI before modifying the working tree.
     ensure_github_cli(repo)
 
-    # Preserve the newest generated files outside the repository.
     with tempfile.TemporaryDirectory(prefix="jira-generated-") as temp_dir:
         snapshot = Path(temp_dir) / "generated_output"
         shutil.copytree(output, snapshot)
 
-        # Allow changes only under this ticket's generated output directory.
-        status = run_git(
-            "status", "--porcelain", "--untracked-files=all", cwd=repo
-        )
-        unrelated = []
-
-        for line in status.splitlines():
-            changed_path = line[3:].strip().replace("\\", "/")
-
-            # Rename records may contain "old -> new".
-            if " -> " in changed_path:
-                changed_path = changed_path.split(" -> ", 1)[1]
-
-            if not (
-                changed_path == relative_output
-                or changed_path.startswith(relative_output + "/")
-            ):
-                unrelated.append(line)
+        # Allow changes in this generated directory only. Its contents
+        # are backed up above, so they can safely be replaced after switching.
+        changed_paths = get_changed_paths(repo)
+        unrelated = [
+            path for path in changed_paths
+            if not path_is_inside(path, relative_output)
+        ]
 
         if unrelated:
             raise RuntimeError(
                 "There are unrelated Git changes. Commit or safely stash "
-                "them before publishing:\n" + "\n".join(unrelated)
+                "them before publishing:\n"
+                + "\n".join(unrelated)
             )
 
-        # Reset only this generated directory. The latest files are safe
-        # in the temporary snapshot, and unrelated files are not touched.
-        run_git(
-            "restore", "--source=HEAD", "--staged", "--worktree",
-            "--", relative_output,
-            cwd=repo,
-        )
-        run_git("clean", "-fd", "--", relative_output, cwd=repo)
-
-        # Fetch the target branch and inspect local/remote Jira branches.
+        # Fetch the base branch before selecting or creating the Jira branch.
         run_git("fetch", "origin", base_branch, cwd=repo)
-
-        local_branch = run_git(
-            "branch", "--list", branch, cwd=repo
-        )
-        remote_branch = run_git(
-            "ls-remote", "--heads", "origin", f"refs/heads/{branch}",
-            cwd=repo,
-        )
 
         current_branch = run_git(
             "branch", "--show-current", cwd=repo
         )
 
+        local_branch = run_git(
+            "branch", "--list", branch, cwd=repo
+        )
+
+        remote_branch = run_git(
+            "ls-remote", "--heads", "origin",
+            f"refs/heads/{branch}", cwd=repo
+        )
+
+        # Clear only the generated output from the index and working tree.
+        # The complete latest output is safe in the temporary snapshot.
+        run_git(
+            "restore",
+            "--source=HEAD",
+            "--staged",
+            "--worktree",
+            "--",
+            relative_output,
+            cwd=repo,
+        )
+        run_git("clean", "-fd", "--", relative_output, cwd=repo)
+
+        # Switch to an existing branch or create it from the base branch.
         if current_branch == branch:
-            # Already on the intended Jira branch.
             pass
         elif local_branch:
             run_git("switch", branch, cwd=repo)
         elif remote_branch:
             run_git(
                 "switch", "--track", "-c", branch,
-                f"origin/{branch}", cwd=repo,
+                f"origin/{branch}", cwd=repo
             )
         else:
             run_git(
                 "switch", "-c", branch,
-                f"origin/{base_branch}", cwd=repo,
+                f"origin/{base_branch}", cwd=repo
             )
 
-        # If the branch already exists remotely, incorporate its latest
-        # commits before applying the new generated files.
+        # Incorporate remote changes before applying new generated output.
         remote_branch = run_git(
-            "ls-remote", "--heads", "origin", f"refs/heads/{branch}",
-            cwd=repo,
+            "ls-remote", "--heads", "origin",
+            f"refs/heads/{branch}", cwd=repo
         )
+
         if remote_branch:
             run_git("pull", "--rebase", "origin", branch, cwd=repo)
 
-        # Replace this ticket's output directory with the saved snapshot.
-        # Removing the old directory also removes obsolete generated files.
+        # Restore the generated snapshot on the Jira branch.
         if output.exists():
             shutil.rmtree(output)
 
         shutil.copytree(snapshot, output)
 
+        # Stage only this ticket's generated files.
         run_git("add", "--", relative_output, cwd=repo)
 
         staged = run_git(
@@ -247,10 +273,10 @@ def publish_generated_tests(
         else:
             print("No generated-file changes to commit.")
 
-        # Push new commits; if there are no new commits, this still ensures
-        # the branch is published when necessary.
+        # Push the Jira-specific branch.
         run_git("push", "-u", "origin", branch, cwd=repo)
 
+        # Create or reuse its pull request.
         pr_url = create_or_reuse_pr(
             repo=repo,
             branch=branch,
