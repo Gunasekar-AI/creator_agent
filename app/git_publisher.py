@@ -27,8 +27,13 @@ def run_command(args, cwd, check=True):
 
 
 def run_git(*args, cwd):
-    """Run a Git command and return its output."""
-    return run_command(["git", *args], cwd=cwd).stdout.strip()
+    """Run a Git command and return its output.
+
+    Trailing newlines are stripped, but leading whitespace is preserved
+    because ``git status --porcelain`` uses the first column for the index
+    status (a leading space is meaningful).
+    """
+    return run_command(["git", *args], cwd=cwd).stdout.rstrip("\r\n")
 
 
 def make_branch_name(issue_key, labels):
@@ -110,32 +115,52 @@ def create_or_reuse_pr(repo, branch, base_branch, issue_key, summary):
 
 def get_changed_paths(repo):
     """Return paths changed in the working tree or index."""
-    result = run_git(
-        "status", "--porcelain", "--untracked-files=all", cwd=repo
-    )
+        # Use a dedicated call with explicit rstrip so the leading space that
+    # encodes the index status is never trimmed away.
+    result = run_command(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=repo,
+    ).stdout.rstrip("\r\n")
 
     paths = []
 
     for line in result.splitlines():
-        if len(line) < 4:
+        # A porcelain v1 record is: XY<space>PATH  (and possibly
+        # "ORIG -> PATH" for renames). Guard against any leading-whitespace
+        # loss by reconstructing XY if it was stripped.
+        if not line:
             continue
 
-        # Git porcelain status may include rename records.
-        path_text = line[3:].strip()
+        # If the line was trimmed at the front, treat the first two chars
+        # as status and find the first path separator after them.
+        if len(line) >= 3 and line[2] == " ":
+            path_text = line[3:]
+        else:
+            # Fallback: skip leading status/whitespace heuristically.
+            path_text = line.lstrip()
+
+        path_text = path_text.strip()
 
         if " -> " in path_text:
             path_text = path_text.split(" -> ", 1)[1]
 
-        # Porcelain output quotes unusual filenames. This project uses
-        # ordinary generated filenames, so normal paths are sufficient.
-        paths.append(path_text.replace("\\", "/"))
+        if path_text:
+            paths.append(path_text.replace("\\", "/"))
 
     return paths
 
 
 def path_is_inside(path, directory):
-    """Check whether a changed path is the directory or one of its files."""
-    return path == directory or path.startswith(directory.rstrip("/") + "/")
+    """Check whether a changed path is the directory or one of its files.
+
+    Normalizes separators, leading/trailing slashes, and case because on
+    Windows Git may report a path with different casing (or with backslashes
+    in some configurations) than ``Path.resolve()`` produces for the output
+    directory.
+    """
+    p = path.replace("\\", "/").strip("/").lower()
+    d = directory.replace("\\", "/").strip("/").lower()
+    return p == d or p.startswith(d + "/")
 
 
 def publish_generated_tests(
@@ -192,8 +217,10 @@ def publish_generated_tests(
         if unrelated:
             raise RuntimeError(
                 "There are unrelated Git changes. Commit or safely stash "
-                "them before publishing:\n"
-                + "\n".join(unrelated)
+                "them before publishing.\n"
+                f"Allowed generated directory: {relative_output}\n"
+                "Unrelated changes:\n"
+                + "\n".join(f"  - {p}" for p in unrelated)
             )
 
         # Fetch the base branch before selecting or creating the Jira branch.
