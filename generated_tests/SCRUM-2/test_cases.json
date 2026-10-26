@@ -13,7 +13,12 @@
         "Click Login."
       ],
       "expected_result": "User successfully navigates to the home page.",
-      "missing_details": []
+      "missing_details": [
+        "Login page URL not specified",
+        "Username field selector not specified",
+        "Password field selector not specified",
+        "Login button selector not specified"
+      ]
     },
     {
       "test_id": "TC-002",
@@ -28,7 +33,13 @@
         "Click Login."
       ],
       "expected_result": "An appropriate error message is displayed.",
-      "missing_details": []
+      "missing_details": [
+        "Login page URL not specified",
+        "Username field selector not specified",
+        "Password field selector not specified",
+        "Login button selector not specified",
+        "Error message text not specified"
+      ]
     },
     {
       "test_id": "TC-003",
@@ -41,7 +52,10 @@
         "Click the Logout button."
       ],
       "expected_result": "User is logged out and redirected to the login page.",
-      "missing_details": []
+      "missing_details": [
+        "Logout button selector not specified",
+        "Logout redirect URL not specified"
+      ]
     },
     {
       "test_id": "TC-004",
@@ -54,7 +68,12 @@
         "Send a login API request with valid credentials."
       ],
       "expected_result": "API returns a successful response and authentication information",
-      "missing_details": []
+      "missing_details": [
+        "API endpoint URL not specified",
+        "HTTP method not specified",
+        "Request payload format not specified",
+        "Response schema not specified"
+      ]
     }
   ]
 }
