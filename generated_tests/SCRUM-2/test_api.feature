@@ -1,19 +1,14 @@
 Feature: Login API with valid credentials
 
-Background:
-  # TODO: Set base URL if needed
-  * url "TODO_BASE_URL"
-
-Scenario: TC-004 Login API with valid credentials
-  Given path "TODO_LOGIN_ENDPOINT"
-  And request
+  Scenario: Successful login
+    # TODO: set the API endpoint URL
+    Given url "TODO_API_ENDPOINT_URL"
+    And request
     """
-    {
-      "username": "TODO_VALID_USERNAME",
-      "password": "TODO_VALID_PASSWORD"
-    }
+    TODO_REQUEST_PAYLOAD_FORMAT
     """
-  When method post
-  Then status 200
-  # TODO: Validate response contains authentication information
-  And match response == { authToken: '#notnull' }
+    When method post
+    Then status 200
+    # TODO: validate response structure and authentication information
+    # Example: assert response contains token
+    # * match response == { token: '#string' }
