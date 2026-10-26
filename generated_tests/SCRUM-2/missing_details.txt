@@ -1,0 +1,8 @@
+Login page URL is required.
+Locators for username field, password field, login button, error message, home page element, logout button, and login page element are required.
+Valid credentials (username and password) for the positive login test are required.
+Invalid credentials for the negative login test are required.
+Home page URL for the logout precondition is required.
+Base URL and login endpoint for the API test are required.
+Request payload structure for the login API (field names) is required.
+Expected response fields (e.g., authentication token) for the API test are required.

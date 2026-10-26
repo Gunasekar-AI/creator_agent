@@ -1,0 +1,31 @@
+# 1. Find where sign-in tests live (no full repo scan)
+git grep -l "signin\|sign-in\|login" -- "*test*" "*spec*"
+
+# 2. Confirm the file's history (optional)
+git log --oneline -- tests/auth/signin.spec.ts
+
+# 3. Find if "forgot password" was ever touched before
+git log -S "forgot password" --oneline
+
+# 4. Open ONLY that file, append the new test case, commit
+
+
+
+
+--------------------
+
+
+JIRA ticket (Test Plan + Test Cases)
+        │ webhook
+        ▼
+Webhook receiver (verify HMAC, ack 200 fast)
+        │ enqueue
+        ▼
+Worker:
+  1. Fetch full ticket (REST API) — webhook payload is thin
+  2. Classify: NEW feature vs EXTENSION
+  3. If EXTENSION → git grep / git log -S → find existing test file
+  4. Build AI prompt (test plan + cases + existing file content if any)
+  5. AI returns test script (diff/append, not full rewrite)
+  6. Write file → git add/commit/push
+  7. Comment commit link back on ticket

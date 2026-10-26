@@ -1,0 +1,60 @@
+{
+  "test_cases": [
+    {
+      "test_id": "TC-001",
+      "test_type": "ui",
+      "title": "Login with valid credentials",
+      "preconditions": [
+        "User has a registered account."
+      ],
+      "steps": [
+        "Open the login page.",
+        "Enter valid username and password.",
+        "Click Login."
+      ],
+      "expected_result": "User successfully navigates to the home page.",
+      "missing_details": []
+    },
+    {
+      "test_id": "TC-002",
+      "test_type": "ui",
+      "title": "Login with invalid credentials",
+      "preconditions": [
+        "Login page is accessible."
+      ],
+      "steps": [
+        "Open the login page.",
+        "Enter invalid username and password.",
+        "Click Login."
+      ],
+      "expected_result": "An appropriate error message is displayed.",
+      "missing_details": []
+    },
+    {
+      "test_id": "TC-003",
+      "test_type": "ui",
+      "title": "Logout successfully",
+      "preconditions": [
+        "User is logged in."
+      ],
+      "steps": [
+        "Click the Logout button."
+      ],
+      "expected_result": "User is logged out and redirected to the login page.",
+      "missing_details": []
+    },
+    {
+      "test_id": "TC-004",
+      "test_type": "api",
+      "title": "Login API with valid credentials",
+      "preconditions": [
+        "Valid test account exists."
+      ],
+      "steps": [
+        "Send a login API request with valid credentials."
+      ],
+      "expected_result": "API returns a successful response and authentication information",
+      "missing_details": []
+    }
+  ]
+}
