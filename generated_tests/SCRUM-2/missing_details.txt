@@ -1,9 +1,11 @@
 Login page URL
-Valid username and password
-Invalid username and password
+Valid username
+Valid password
+Invalid username
+Invalid password
 Error message text
 Logout button selector
-Login page URL after redirect
+Login page URL after logout
 API endpoint URL
 Request payload format
-Authentication information fields
+Authentication information fields in response
