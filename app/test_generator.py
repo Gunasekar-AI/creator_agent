@@ -1,4 +1,3 @@
-
 import ast
 import json
 import os
@@ -109,11 +108,11 @@ def parse_json_response(response_text):
 
 def normalize_generated_code(code):
     """
-    Normalize source code returned as a JSON string.
+    Normalize source returned as a JSON string by the model.
 
-    JSON parsing already decodes standard escaped newlines. This function
-    handles an additional escaping layer without decoding ordinary Python
-    backslashes when the source already contains real newlines.
+    The outer response is decoded by json.loads(). Some model responses
+    nevertheless contain an additional escaping layer (literal \\n and \\" ).
+    Convert those only as needed, then validate the source before saving.
     """
     if not isinstance(code, str):
         return ""
@@ -122,17 +121,22 @@ def normalize_generated_code(code):
     if not code:
         return ""
 
-    # A normal multi-line script should not need newline conversion.
-    # Only convert escaped newlines when the entire source is still one line.
+    # If the source is still one line and contains escaped newline markers,
+    # decode the extra escaping layer.
     if "\n" not in code and r"\n" in code:
         code = code.replace(r"\\n", "\n")
         code = code.replace(r"\n", "\n")
         code = code.replace(r"\r", "\r")
 
-        # The generated code may also have escaped quotation marks.
-        code = code.replace(r"\"", '"')
+    # Escaped quotes can remain even when newline characters are already real.
+    # Groq should return source code, not a second JSON-encoded string.
+    code = code.replace(r'\"', '"')
 
-    return code
+    # Remove accidental Markdown fences if the model ignored the instruction.
+    code = re.sub(r"^\s*```(?:python|gherkin|karate|feature)?\s*", "", code)
+    code = re.sub(r"\s*```\s*$", "", code)
+
+    return code.strip()
 
 
 def extract_test_cases(ticket):
@@ -256,7 +260,8 @@ Requirements:
 6. Use the API endpoint and JSON payload specified above.
 7. In Karate, verify status 200 and the success, message and username
    response fields.
-8. Use a Selenium ChromeOptions fixture with headless mode.
+8. Do not enable headless mode. Chrome must open visibly when tests are
+   run locally on Windows. CI may provide a virtual display if needed.
 9. Do not invent endpoints, selectors, or application behavior.
 10. Return an empty missing_details array for details supplied above.
 11. Return no Markdown fences or explanatory prose.
