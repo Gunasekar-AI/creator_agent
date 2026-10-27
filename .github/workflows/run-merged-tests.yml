@@ -31,9 +31,9 @@ jobs:
           pip install pytest selenium fastapi uvicorn pydantic
 
       - name: Set up Chrome
-        uses: browser-actions/setup-chrome@v2
+        uses: browser-actions/setup-chrome@v1
         with:
-          chrome-version: stable
+          chrome-version: 155
           install-chromedriver: true
 
       - name: Start demo backend
