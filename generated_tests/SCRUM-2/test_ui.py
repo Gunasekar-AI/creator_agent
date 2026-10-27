@@ -4,67 +4,55 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def driver():
-    # TODO: configure WebDriver as needed (e.g., ChromeOptions)
+    # TODO: configure WebDriver (e.g., Chrome, options)
     driver = webdriver.Chrome()
     driver.implicitly_wait(5)
     yield driver
     driver.quit()
 
 def test_login_with_valid_credentials(driver):
-    # TODO: set the login page URL
-    login_url = "TODO_LOGIN_PAGE_URL"
-    driver.get(login_url)
-
-    wait = WebDriverWait(driver, 10)
-
-    # TODO: locate username and password fields
-    username_field = wait.until(EC.visibility_of_element_located((By.ID, "TODO_USERNAME_FIELD_ID")))
-    password_field = wait.until(EC.visibility_of_element_located((By.ID, "TODO_PASSWORD_FIELD_ID")))
-    login_button = wait.until(EC.element_to_be_clickable((By.ID, "TODO_LOGIN_BUTTON_ID")))
-
-    # TODO: provide valid credentials
+    # TODO: set login_page_url
+    driver.get("TODO_LOGIN_PAGE_URL")
+    # TODO: set selectors
+    username_field = WebDriverWait(driver, 10).until(
+        EC.visibility_of_element_located((By.CSS_SELECTOR, "TODO_USERNAME_SELECTOR"))
+    )
+    password_field = driver.find_element(By.CSS_SELECTOR, "TODO_PASSWORD_SELECTOR")
+    login_button = driver.find_element(By.CSS_SELECTOR, "TODO_LOGIN_BUTTON_SELECTOR")
     username_field.send_keys("TODO_VALID_USERNAME")
     password_field.send_keys("TODO_VALID_PASSWORD")
     login_button.click()
-
-    # TODO: verify navigation to home page (e.g., URL or unique element)
-    home_indicator = wait.until(EC.visibility_of_element_located((By.ID, "TODO_HOME_PAGE_INDICATOR_ID")))
+    # TODO: verify navigation to home page, e.g., by checking a home page element or URL
+    home_indicator = WebDriverWait(driver, 10).until(
+        EC.visibility_of_element_located((By.CSS_SELECTOR, "TODO_HOME_INDICATOR_SELECTOR"))
+    )
     assert home_indicator.is_displayed()
 
 def test_login_with_invalid_credentials(driver):
-    # TODO: set the login page URL
-    login_url = "TODO_LOGIN_PAGE_URL"
-    driver.get(login_url)
-
-    wait = WebDriverWait(driver, 10)
-
-    # TODO: locate username and password fields
-    username_field = wait.until(EC.visibility_of_element_located((By.ID, "TODO_USERNAME_FIELD_ID")))
-    password_field = wait.until(EC.visibility_of_element_located((By.ID, "TODO_PASSWORD_FIELD_ID")))
-    login_button = wait.until(EC.element_to_be_clickable((By.ID, "TODO_LOGIN_BUTTON_ID")))
-
-    # TODO: provide invalid credentials
+    driver.get("TODO_LOGIN_PAGE_URL")
+    username_field = WebDriverWait(driver, 10).until(
+        EC.visibility_of_element_located((By.CSS_SELECTOR, "TODO_USERNAME_SELECTOR"))
+    )
+    password_field = driver.find_element(By.CSS_SELECTOR, "TODO_PASSWORD_SELECTOR")
+    login_button = driver.find_element(By.CSS_SELECTOR, "TODO_LOGIN_BUTTON_SELECTOR")
     username_field.send_keys("TODO_INVALID_USERNAME")
     password_field.send_keys("TODO_INVALID_PASSWORD")
     login_button.click()
-
-    # TODO: verify error message text
-    error_msg = wait.until(EC.visibility_of_element_located((By.ID, "TODO_ERROR_MESSAGE_ID")))
-    assert error_msg.text == "TODO_EXACT_ERROR_MESSAGE_TEXT"
+    error_msg = WebDriverWait(driver, 10).until(
+        EC.visibility_of_element_located((By.CSS_SELECTOR, "TODO_ERROR_MESSAGE_SELECTOR"))
+    )
+    # TODO: replace with expected error text
+    assert "TODO_ERROR_MESSAGE_TEXT" in error_msg.text
 
 def test_logout_successfully(driver):
-    # Precondition: user is logged in.
-    # TODO: implement login steps or reuse a helper.
-    # For brevity, assume the user is already logged in.
-
-    wait = WebDriverWait(driver, 10)
-
-    # TODO: locate logout button
-    logout_button = wait.until(EC.element_to_be_clickable((By.ID, "TODO_LOGOUT_BUTTON_ID")))
+    # Assume user is already logged in; TODO: implement login steps or session setup
+    # TODO: navigate to a page where logout button is visible
+    logout_button = WebDriverWait(driver, 10).until(
+        EC.element_to_be_clickable((By.CSS_SELECTOR, "TODO_LOGOUT_BUTTON_SELECTOR"))
+    )
     logout_button.click()
-
-    # TODO: verify redirection to login page
-    login_page_indicator = wait.until(EC.visibility_of_element_located((By.ID, "TODO_LOGIN_PAGE_INDICATOR_ID")))
-    assert login_page_indicator.is_displayed()
+    # Verify redirect to login page
+    WebDriverWait(driver, 10).until(EC.url_contains("TODO_LOGIN_PAGE_URL"))
+    assert driver.current_url == "TODO_LOGIN_PAGE_URL"
