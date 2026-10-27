@@ -4,6 +4,9 @@ import os
 import re
 from pathlib import Path
 
+import pytest
+from selenium import webdriver
+
 from dotenv import load_dotenv
 from groq import Groq
 
@@ -249,6 +252,18 @@ Return one valid JSON object with exactly these keys:
 - api_karate: string containing a Karate feature
 - missing_details: array of strings
 
+
+For local Windows execution:
+- Do not use headless mode.
+- Create a webdriver.ChromeOptions() object.
+- Add options.add_argument("--window-size=1920,1080").
+- Create the driver using webdriver.Chrome(options=options).
+- Do not call driver.maximize_window().
+- Do not use input() to pause the browser.
+- Always call driver.quit() during fixture teardown.
+- Keep the generated test fixture compatible with GitHub Actions.
+
+
 Requirements:
 1. Use the exact application URLs, element IDs, credentials and messages
    specified above. Never replace them with TODO placeholders.
@@ -333,6 +348,14 @@ Do not return Markdown fences or text outside the JSON object.
     )
 
     return result
+
+@pytest.fixture(scope="function")
+def driver():
+    options = webdriver.ChromeOptions()
+    options.add_argument("--window-size=1920,1080")
+    driver = webdriver.Chrome(options=options)
+    yield driver
+    driver.quit()
 
 
 def generate_scripts(ticket):
