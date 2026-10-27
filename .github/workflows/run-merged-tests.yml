@@ -3,12 +3,12 @@ name: Run AI Generated Tests After Merge
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
   run-merged-tests:
@@ -17,11 +17,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout merged main
+      - name: Checkout main
         uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -53,13 +50,10 @@ jobs:
             fi
             sleep 2
           done
-
           cat "$RUNNER_TEMP/fastapi.log"
           exit 1
 
       - name: Run generated UI tests
-        env:
-          BASE_URL: http://127.0.0.1:8001
         run: |
           xvfb-run -a python -m pytest -v --tb=short generated_tests
 
@@ -70,6 +64,78 @@ jobs:
           name: demo-backend-log
           path: ${{ runner.temp }}/fastapi.log
           if-no-files-found: ignore
+
+# name: Run AI Generated Tests After Merge
+
+# on:
+#   push:
+#     branches: [main]
+#   workflow_dispatch:
+
+# permissions:
+#   contents: read
+#   pull-requests: read
+
+# jobs:
+#   run-merged-tests:
+#       if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+
+#     runs-on: ubuntu-latest
+
+#     steps:
+#       - name: Checkout merged main
+#         uses: actions/checkout@v4
+#         with:
+#           ref: main
+#           fetch-depth: 0
+
+#       - name: Set up Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: "3.12"
+
+#       - name: Install dependencies
+#         run: |
+#           python -m pip install --upgrade pip
+#           pip install pytest selenium fastapi uvicorn pydantic
+
+#       - name: Set up Chrome
+#         uses: browser-actions/setup-chrome@v1
+
+#       - name: Start demo backend
+#         working-directory: demo-app/backend
+#         run: |
+#           nohup python -m uvicorn main:app \
+#             --host 127.0.0.1 \
+#             --port 8001 \
+#             > "$RUNNER_TEMP/fastapi.log" 2>&1 &
+
+#       - name: Wait for demo backend
+#         run: |
+#           for i in $(seq 1 30); do
+#             if curl --fail --silent http://127.0.0.1:8001/ > /dev/null; then
+#               echo "Demo application is ready"
+#               exit 0
+#             fi
+#             sleep 2
+#           done
+
+#           cat "$RUNNER_TEMP/fastapi.log"
+#           exit 1
+
+#       - name: Run generated UI tests
+#         env:
+#           BASE_URL: http://127.0.0.1:8001
+#         run: |
+#           xvfb-run -a python -m pytest -v --tb=short generated_tests
+
+#       - name: Upload backend logs on failure
+#         if: failure()
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: demo-backend-log
+#           path: ${{ runner.temp }}/fastapi.log
+#           if-no-files-found: ignore
 
 
 
