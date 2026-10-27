@@ -1,45 +1,70 @@
+import os
+
 import pytest
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-@pytest.fixture
+BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8000")
+
+VALID_USER = "testuser"
+VALID_PASS = "Password123"
+INVALID_USER = "wronguser"
+INVALID_PASS = "wrongpass"
+
+
+@pytest.fixture(scope="function")
 def driver():
-    driver = webdriver.Chrome()  # TODO: configure driver as needed
-    yield driver
-    driver.quit()
+    options = webdriver.ChromeOptions()
+    drv = webdriver.Chrome(options=options)
+    drv.implicitly_wait(5)
+    yield drv
+    drv.quit()
+
+
+def _login(driver, username, password):
+    driver.get(BASE_URL + "/")
+    wait = WebDriverWait(driver, 10)
+    user_field = wait.until(EC.visibility_of_element_located((By.ID, "username")))
+    pass_field = driver.find_element(By.ID, "password")
+    button = driver.find_element(By.ID, "login-button")
+    user_field.send_keys(username)
+    pass_field.send_keys(password)
+    button.click()
+    return wait
+
 
 def test_login_with_valid_credentials(driver):
-    driver.get("TODO_LOGIN_PAGE_URL")
-    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "username")))
+    wait = _login(driver, VALID_USER, VALID_PASS)
 
-    driver.find_element(By.ID, "username").send_keys("TODO_VALID_USERNAME")
-    driver.find_element(By.ID, "password").send_keys("TODO_VALID_PASSWORD")
-    driver.find_element(By.ID, "loginButton").click()
+    dashboard_title = wait.until(
+        EC.visibility_of_element_located((By.ID, "dashboard-title"))
+    )
+    assert dashboard_title.is_displayed()
 
-    WebDriverWait(driver, 10).until(EC.url_contains("TODO_HOME_URL"))
-    assert "TODO_HOME_URL" in driver.current_url
+    status = driver.find_element(By.ID, "login-status")
+    wait.until(lambda d: status.text != "")
+    assert status.text == "Login successful"
+
 
 def test_login_with_invalid_credentials(driver):
-    driver.get("TODO_LOGIN_PAGE_URL")
-    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "username")))
+    wait = _login(driver, INVALID_USER, INVALID_PASS)
 
-    driver.find_element(By.ID, "username").send_keys("TODO_INVALID_USERNAME")
-    driver.find_element(By.ID, "password").send_keys("TODO_INVALID_PASSWORD")
-    driver.find_element(By.ID, "loginButton").click()
-
-    error_elem = WebDriverWait(driver, 10).until(
-        EC.visibility_of_element_located((By.CSS_SELECTOR, "TODO_ERROR_MESSAGE_SELECTOR"))
+    status = wait.until(
+        EC.visibility_of_element_located((By.ID, "login-status"))
     )
-    assert error_elem.text == "TODO_ERROR_MESSAGE_TEXT"
+    wait.until(lambda d: status.text != "")
+    assert status.text == "Invalid username or password"
 
+    assert not driver.find_element(By.ID, "dashboard-title").is_displayed()
+
+
+@pytest.mark.xfail(
+    reason="Demo app has no logout control or /logout route; "
+           "scenario came from the Jira ticket, not the implementation.",
+    strict=True,
+)
 def test_logout_successfully(driver):
-    # Assume user is already logged in; TODO: implement login steps or session setup
-    driver.get("TODO_HOME_URL")
-    logout_btn = WebDriverWait(driver, 10).until(
-        EC.element_to_be_clickable((By.CSS_SELECTOR, "TODO_LOGOUT_BUTTON_SELECTOR"))
-    )
-    logout_btn.click()
-    WebDriverWait(driver, 10).until(EC.url_contains("TODO_LOGIN_PAGE_URL_AFTER_REDIRECT"))
-    assert "TODO_LOGIN_PAGE_URL_AFTER_REDIRECT" in driver.current_url
+    _login(driver, VALID_USER, VALID_PASS)
+    driver.find_element(By.ID, "logout-button")

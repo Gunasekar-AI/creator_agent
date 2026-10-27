@@ -2,10 +2,8 @@
 name: Run AI Generated Tests After Merge
 
 on:
-  pull_request:
-    types: [merged]
-    branches:
-      - main
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -14,9 +12,7 @@ permissions:
 
 jobs:
   run-merged-tests:
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.pull_request.merged == true
+      if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
 
     runs-on: ubuntu-latest
 
