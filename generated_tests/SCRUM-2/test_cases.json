@@ -15,8 +15,9 @@
       "expected_result": "User successfully navigates to the home page.",
       "missing_details": [
         "Login page URL",
-        "Valid username",
-        "Valid password",
+        "Username field selector",
+        "Password field selector",
+        "Login button selector",
         "Home page URL"
       ]
     },
@@ -35,9 +36,11 @@
       "expected_result": "An appropriate error message is displayed.",
       "missing_details": [
         "Login page URL",
-        "Invalid username",
-        "Invalid password",
-        "Error message text"
+        "Username field selector",
+        "Password field selector",
+        "Login button selector",
+        "Error message text",
+        "Error message selector"
       ]
     },
     {
@@ -53,7 +56,7 @@
       "expected_result": "User is logged out and redirected to the login page.",
       "missing_details": [
         "Logout button selector",
-        "Login page URL after logout"
+        "Login page URL"
       ]
     },
     {
@@ -70,7 +73,8 @@
       "missing_details": [
         "Login API endpoint URL",
         "Request payload format",
-        "Authentication information fields in response"
+        "Authentication token field name",
+        "Response schema"
       ]
     }
   ]
