@@ -20,61 +20,31 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
+
 def process_jira_issue(issue_key):
-    """Generate tests, publish the PR, and execute UI tests locally."""
+    """Generate tests and publish a PR. Tests run after merge to main."""
     try:
         logger.info("AI Test Generator Started")
         logger.info("Issue: %s", issue_key)
 
-        # 1. Fetch the latest Jira issue
+        # 1. Fetch the latest issue from Jira
         jira = JiraReader()
         ticket = jira.get_ticket(issue_key)
 
-        # 2. Generate and publish the test scripts
+        # 2. Generate test scripts and publish the GitHub PR
         generate_scripts(ticket)
 
-        # 3. Locate the generated UI test file
-        test_file = (
-            PROJECT_ROOT
-            / "generated_tests"
-            / issue_key
-            / "test_ui.py"
+        # 3. Do not execute pytest locally.
+        # GitHub Actions will run the tests after the PR
+        # is merged into main.
+        logger.info(
+            "Test generation and PR publishing completed for %s. "
+            "Waiting for PR merge into main to run tests.",
+            issue_key,
         )
-
-        if not test_file.is_file():
-            logger.error("Generated UI test file not found: %s", test_file)
-            return
-
-        # 4. Run pytest in a separate process.
-        # Visible Chrome opens because the generated fixture uses
-        # webdriver.Chrome() without headless mode.
-        logger.info("Starting local UI tests for %s", issue_key)
-
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pytest",
-                "-v",
-                "-s",
-                str(test_file),
-            ],
-            cwd=str(PROJECT_ROOT),
-            check=False,
-        )
-
-        if result.returncode == 0:
-            logger.info("UI tests completed successfully for %s", issue_key)
-        else:
-            logger.error(
-                "UI tests finished with exit code %s for %s",
-                result.returncode,
-                issue_key,
-            )
 
     except Exception:
         logger.exception("Failed to process Jira issue %s", issue_key)
-
 
 @app.post("/webhook/jira")
 async def jira_webhook(
