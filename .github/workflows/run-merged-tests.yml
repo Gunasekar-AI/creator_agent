@@ -35,10 +35,20 @@ jobs:
           chrome-version: stable
           install-chromedriver: true
 
-      - name: Verify Chrome versions
+      - name: Configure Chrome and ChromeDriver
+        shell: bash
         run: |
-          ${{ steps.setup-chrome.outputs.chrome-path }} --version
-          ${{ steps.setup-chrome.outputs.chromedriver-path }} --version
+          CHROME_PATH="${{ steps.setup-chrome.outputs.chrome-path }}"
+          DRIVER_PATH="${{ steps.setup-chrome.outputs.chromedriver-path }}"
+
+          echo "Chrome binary: $CHROME_PATH"
+          echo "ChromeDriver binary: $DRIVER_PATH"
+
+          "$CHROME_PATH" --version
+          "$DRIVER_PATH" --version
+
+          echo "CHROME_BIN=$CHROME_PATH" >> "$GITHUB_ENV"
+          echo "CHROMEDRIVER_PATH=$DRIVER_PATH" >> "$GITHUB_ENV"
 
       - name: Start demo backend
         working-directory: demo-app/backend
@@ -49,6 +59,7 @@ jobs:
             > "$RUNNER_TEMP/fastapi.log" 2>&1 &
 
       - name: Wait for demo backend
+        shell: bash
         run: |
           for i in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8001/ > /dev/null; then
@@ -57,10 +68,14 @@ jobs:
             fi
             sleep 2
           done
+
           cat "$RUNNER_TEMP/fastapi.log"
           exit 1
 
       - name: Run generated UI tests
+        env:
+          CHROME_BIN: ${{ env.CHROME_BIN }}
+          CHROMEDRIVER_PATH: ${{ env.CHROMEDRIVER_PATH }}
         run: |
           xvfb-run -a python -m pytest -v --tb=short generated_tests
 
@@ -71,6 +86,7 @@ jobs:
           name: demo-backend-log
           path: ${{ runner.temp }}/fastapi.log
           if-no-files-found: ignore
+
 
 
 # name: Run AI Generated Tests After Merge

@@ -1,16 +1,28 @@
 import pytest
+import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+
 @pytest.fixture(scope="function")
 def driver():
     options = webdriver.ChromeOptions()
+    options.binary_location = os.environ.get("CHROME_BIN")
     options.add_argument("--window-size=1920,1080")
-    driver = webdriver.Chrome(options=options)
-    yield driver
-    driver.quit()
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+
+    service = Service(os.environ["CHROMEDRIVER_PATH"])
+    browser = webdriver.Chrome(service=service, options=options)
+
+    try:
+        yield browser
+    finally:
+        browser.quit()
 
 def test_login_valid(driver):
     driver.get("http://127.0.0.1:8001/")
