@@ -269,7 +269,10 @@ For invalid-login tests, verify the dashboard is not visible using
 Selenium's is_displayed(). Do not use presence_of_element_located()
 with pytest.raises(TimeoutException) to assert that the dashboard
 is absent or hidden.
-
+For invalid-login UI tests, verify that the dashboard is not visible
+using Selenium's is_displayed(). Do not use
+pytest.raises(TimeoutException) with presence_of_element_located()
+to verify that the dashboard is hidden.
 Return exactly one valid JSON object.
 The object must contain ui_pytest, api_karate, and missing_details.
 
