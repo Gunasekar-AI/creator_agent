@@ -1,9 +1,8 @@
 Feature: Login API with valid credentials
 
-  Scenario: Successful login
-    Given url 'TODO_API_ENDPOINT'
-    And request { username: 'TODO_VALID_USERNAME', password: 'TODO_VALID_PASSWORD' }
+Scenario: Login with valid credentials
+    Given url "TODO_API_ENDPOINT_URL"
+    And request { TODO_REQUEST_PAYLOAD }
     When method post
     Then status 200
-    # TODO: add response schema validation
-    And match response == { TODO_RESPONSE_FIELDS }
+    # TODO: validate authentication information fields in response
