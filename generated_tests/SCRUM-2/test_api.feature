@@ -8,3 +8,4 @@ Scenario: Successful login
     And match response.success == true
     And match response.message == 'Login successful'
     And match response.username == 'testuser'
+
