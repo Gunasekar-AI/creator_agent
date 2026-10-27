@@ -1,0 +1,68 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QA Reusability Demo</title>
+</head>
+<body>
+    <h1>QA Reusability Demo Application</h1>
+
+    <h2>Login</h2>
+
+    <form id="login-form">
+        <label for="username">Username</label>
+        <input id="username" name="username" type="text" required>
+
+        <br><br>
+
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" required>
+
+        <br><br>
+
+        <button id="login-button" type="submit">Login</button>
+    </form>
+
+    <p id="login-status" role="status"></p>
+
+    <h2 id="dashboard-title" hidden>Dashboard</h2>
+    <p id="dashboard-message" hidden></p>
+
+    <script>
+        const form = document.getElementById("login-form");
+
+        form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+
+            const username = document.getElementById("username").value;
+            const password = document.getElementById("password").value;
+            const status = document.getElementById("login-status");
+
+            try {
+                const response = await fetch("/api/login", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const result = await response.json();
+                status.textContent = result.message;
+
+                if (result.success) {
+                    const dashboardResponse = await fetch("/api/dashboard");
+                    const dashboard = await dashboardResponse.json();
+
+                    document.getElementById("dashboard-title").hidden = false;
+                    document.getElementById("dashboard-message").hidden = false;
+                    document.getElementById("dashboard-message").textContent =
+                        dashboard.message;
+                }
+            } catch {
+                status.textContent = "Unable to connect to the server";
+            }
+        });
+    </script>
+</body>
+</html>

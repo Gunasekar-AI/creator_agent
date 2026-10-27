@@ -1,81 +1,89 @@
+- name: Start FastAPI demo application
+  working-directory: demo-app/backend
+  run: |
+    nohup python -m uvicorn main:app \
+      --host 127.0.0.1 \
+      --port 8000 \
+      > "$RUNNER_TEMP/fastapi.log" 2>&1 &
 
-name: Run AI Generated Tests After Merge
 
-on:
-  pull_request:
-    types: [closed]
-    branches:
-      - main
+# name: Run AI Generated Tests After Merge
 
-  workflow_dispatch:
+# on:
+#   pull_request:
+#     types: [closed]
+#     branches:
+#       - main
 
-permissions:
-  contents: read
-  pull-requests: read
+#   workflow_dispatch:
 
-jobs:
-  run-merged-tests:
-    # For automatic runs, only continue when the PR was merged.
-    # workflow_dispatch also allows manual testing.
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.pull_request.merged == true
+# permissions:
+#   contents: read
+#   pull-requests: read
 
-    runs-on: ubuntu-latest
+# jobs:
+#   run-merged-tests:
+#     # For automatic runs, only continue when the PR was merged.
+#     # workflow_dispatch also allows manual testing.
+#     if: >
+#       github.event_name == 'workflow_dispatch' ||
+#       github.event.pull_request.merged == true
 
-    env:
-      GH_TOKEN: ${{ github.token }}
-      BASE_URL: http://127.0.0.1:8000
+#     runs-on: ubuntu-latest
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
+#     env:
+#       GH_TOKEN: ${{ github.token }}
+#       BASE_URL: http://127.0.0.1:8000
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
+#         with:
+#           ref: main
+#           fetch-depth: 0
 
-      - name: Install Python dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pytest selenium fastapi uvicorn pydantic
+#       - name: Set up Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: "3.12"
 
-      - name: Set up Chrome
-        uses: browser-actions/setup-chrome@v1
+#       - name: Install Python dependencies
+#         run: |
+#           python -m pip install --upgrade pip
+#           pip install pytest selenium fastapi uvicorn pydantic
 
-      - name: Start FastAPI demo application
-        working-directory: backend
-        run: |
-          nohup python -m uvicorn main:app \
-            --host 127.0.0.1 \
-            --port 8000 \
-            > "$RUNNER_TEMP/fastapi.log" 2>&1 &
+#       - name: Set up Chrome
+#         uses: browser-actions/setup-chrome@v1
 
-      - name: Wait for application
-        run: |
-          for i in $(seq 1 30); do
-            if curl --fail --silent http://127.0.0.1:8000/ > /dev/null; then
-              echo "Application is ready"
-              exit 0
-            fi
-            sleep 2
-          done
+#       - name: Start FastAPI demo application
+#         working-directory: backend
+#         run: |
+#           nohup python -m uvicorn main:app \
+#             --host 127.0.0.1 \
+#             --port 8000 \
+#             > "$RUNNER_TEMP/fastapi.log" 2>&1 &
 
-          echo "Application failed to start"
-          cat "$RUNNER_TEMP/fastapi.log"
-          exit 1
+#       - name: Wait for application
+#         run: |
+#           for i in $(seq 1 30); do
+#             if curl --fail --silent http://127.0.0.1:8000/ > /dev/null; then
+#               echo "Application is ready"
+#               exit 0
+#             fi
+#             sleep 2
+#           done
 
-      - name: Run merged test runner
-        run: python -m app.run_merged_tests --branch main
+#           echo "Application failed to start"
+#           cat "$RUNNER_TEMP/fastapi.log"
+#           exit 1
 
-      - name: Upload application logs on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: fastapi-server-log
-          path: ${{ runner.temp }}/fastapi.log
-          if-no-files-found: ignore
+#       - name: Run merged test runner
+#         run: python -m app.run_merged_tests --branch main
+
+#       - name: Upload application logs on failure
+#         if: failure()
+#         uses: actions/upload-artifact@v4
+#         with:
+#           name: fastapi-server-log
+#           path: ${{ runner.temp }}/fastapi.log
+#           if-no-files-found: ignore
