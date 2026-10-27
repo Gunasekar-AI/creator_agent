@@ -1,4 +1,3 @@
-
 name: Run AI Generated Tests After Merge
 
 on:
@@ -28,34 +27,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest selenium fastapi uvicorn pydantic
 
-      - name: Set up Chrome and ChromeDriver
-        id: setup-chrome
-        uses: browser-actions/setup-chrome@v2
-        with:
-          chrome-version: stable
-          install-chromedriver: true
+      # No setup-chrome step needed — Selenium Manager will resolve
+      # a matching chromedriver for the pre-installed Chrome.
 
-      - name: Verify installed browser and driver
+      - name: Verify installed browser
         shell: bash
         run: |
-          CHROME_PATH="${{ steps.setup-chrome.outputs.chrome-path }}"
-          DRIVER_PATH="${{ steps.setup-chrome.outputs.chromedriver-path }}"
-
-          echo "Installed Chrome:"
-          "$CHROME_PATH" --version
-
-          echo "Installed ChromeDriver:"
-          "$DRIVER_PATH" --version
-
-          echo "CHROME_BIN=$CHROME_PATH" >> "$GITHUB_ENV"
-          echo "CHROMEDRIVER_PATH=$DRIVER_PATH" >> "$GITHUB_ENV"
+          /opt/google/chrome/chrome --version || google-chrome --version || true
 
       - name: Start demo backend
         working-directory: demo-app/backend
         run: |
           nohup python -m uvicorn main:app \
-            --host 127.0.0.1 \
-            --port 8001 \
+            --host 127.0.0.1 --port 8001 \
             > "$RUNNER_TEMP/fastapi.log" 2>&1 &
 
       - name: Wait for demo backend
@@ -63,19 +47,15 @@ jobs:
         run: |
           for i in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8001/ > /dev/null; then
-              echo "Demo application is ready"
-              exit 0
+              echo "Demo application is ready"; exit 0
             fi
             sleep 2
           done
-
           echo "Demo backend failed to start. Backend logs:"
-          cat "$RUNNER_TEMP/fastapi.log"
-          exit 1
+          cat "$RUNNER_TEMP/fastapi.log"; exit 1
 
       - name: Run generated UI tests
-        run: |
-          xvfb-run -a python -m pytest -v --tb=short generated_tests
+        run: xvfb-run -a python -m pytest -v --tb=short generated_tests
 
       - name: Upload backend logs on failure
         if: failure()

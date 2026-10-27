@@ -5,7 +5,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def driver():
     options = webdriver.ChromeOptions()
     options.add_argument("--window-size=1920,1080")
@@ -15,26 +15,37 @@ def driver():
 
 def test_login_valid(driver):
     driver.get("http://127.0.0.1:8001/")
-    WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.ID, "username"))).send_keys("testuser")
-    driver.find_element(By.ID, "password").send_keys("Password123")
-    driver.find_element(By.ID, "login-button").click()
-    status_elem = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.ID, "login-status")))
+    wait = WebDriverWait(driver, 10)
+    username_field = wait.until(EC.presence_of_element_located((By.ID, "username")))
+    password_field = wait.until(EC.presence_of_element_located((By.ID, "password")))
+    login_button = wait.until(EC.element_to_be_clickable((By.ID, "login-button")))
+    username_field.clear()
+    username_field.send_keys("testuser")
+    password_field.clear()
+    password_field.send_keys("Password123")
+    login_button.click()
+    status_elem = wait.until(EC.visibility_of_element_located((By.ID, "login-status")))
     assert status_elem.text == "Login successful"
-    dashboard_title = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.ID, "dashboard-title")))
-    assert dashboard_title.is_displayed()
+    dashboard_title = wait.until(EC.visibility_of_element_located((By.ID, "dashboard-title")))
     assert dashboard_title.text == "Dashboard"
-    dashboard_msg = driver.find_element(By.ID, "dashboard-message")
-    assert dashboard_msg.is_displayed()
-    assert dashboard_msg.text == "Welcome to the QA Demo Application"
+    assert dashboard_title.is_displayed()
+    dashboard_message = wait.until(EC.visibility_of_element_located((By.ID, "dashboard-message")))
+    assert dashboard_message.text == "Welcome to the QA Demo Application"
+    assert dashboard_message.is_displayed()
 
 def test_login_invalid(driver):
     driver.get("http://127.0.0.1:8001/")
-    WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.ID, "username"))).send_keys("invalid_user")
-    driver.find_element(By.ID, "password").send_keys("WrongPassword123")
-    driver.find_element(By.ID, "login-button").click()
-    status_elem = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.ID, "login-status")))
+    wait = WebDriverWait(driver, 10)
+    username_field = wait.until(EC.presence_of_element_located((By.ID, "username")))
+    password_field = wait.until(EC.presence_of_element_located((By.ID, "password")))
+    login_button = wait.until(EC.element_to_be_clickable((By.ID, "login-button")))
+    username_field.clear()
+    username_field.send_keys("invalid_user")
+    password_field.clear()
+    password_field.send_keys("WrongPassword123")
+    login_button.click()
+    status_elem = wait.until(EC.visibility_of_element_located((By.ID, "login-status")))
     assert status_elem.text == "Invalid username or password"
-    # Verify dashboard is not displayed
     try:
         dashboard = driver.find_element(By.ID, "dashboard-title")
         assert not dashboard.is_displayed()
