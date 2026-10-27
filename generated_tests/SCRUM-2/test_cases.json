@@ -15,7 +15,7 @@
       "expected_result": "User successfully navigates to the home page.",
       "missing_details": [
         "Login page URL not specified",
-        "Username and password fields not specified"
+        "Valid username and password values not specified"
       ]
     },
     {
@@ -33,7 +33,7 @@
       "expected_result": "An appropriate error message is displayed.",
       "missing_details": [
         "Login page URL not specified",
-        "Error message text not specified"
+        "Invalid username and password values not specified"
       ]
     },
     {
@@ -48,8 +48,7 @@
       ],
       "expected_result": "User is logged out and redirected to the login page.",
       "missing_details": [
-        "Logout button selector not specified",
-        "Login page URL after logout not specified"
+        "Logout button selector not specified"
       ]
     },
     {
@@ -66,7 +65,7 @@
       "missing_details": [
         "API endpoint URL not specified",
         "Request payload format not specified",
-        "Response schema not specified"
+        "Authentication information details not specified"
       ]
     }
   ]
