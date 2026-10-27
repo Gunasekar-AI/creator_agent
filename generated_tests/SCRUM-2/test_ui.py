@@ -8,48 +8,33 @@ from selenium.webdriver.support import expected_conditions as EC
 def driver():
     options = webdriver.ChromeOptions()
     options.add_argument("--window-size=1920,1080")
-    drv = webdriver.Chrome(options=options)
-    yield drv
-    drv.quit()
+    driver = webdriver.Chrome(options=options)
+    yield driver
+    driver.quit()
 
 def test_login_valid(driver):
     driver.get("http://127.0.0.1:8001/")
-    wait = WebDriverWait(driver, 10)
-    username = wait.until(EC.visibility_of_element_located((By.ID, "username")))
-    password = driver.find_element(By.ID, "password")
-    login_btn = driver.find_element(By.ID, "login-button")
-    username.clear()
-    username.send_keys("testuser")
-    password.clear()
-    password.send_keys("Password123")
-    login_btn.click()
-    status = wait.until(EC.visibility_of_element_located((By.ID, "login-status")))
-    assert status.text == "Login successful"
-    dashboard_title = wait.until(EC.visibility_of_element_located((By.ID, "dashboard-title")))
-    dashboard_message = wait.until(EC.visibility_of_element_located((By.ID, "dashboard-message")))
+    WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.ID, "username"))).send_keys("testuser")
+    driver.find_element(By.ID, "password").send_keys("Password123")
+    driver.find_element(By.ID, "login-button").click()
+    status_elem = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.ID, "login-status")))
+    assert status_elem.text == "Login successful"
+    dashboard_title = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "dashboard-title")))
+    dashboard_message = driver.find_element(By.ID, "dashboard-message")
     assert dashboard_title.is_displayed()
-    assert dashboard_title.text == "Dashboard"
     assert dashboard_message.is_displayed()
+    assert dashboard_title.text == "Dashboard"
     assert dashboard_message.text == "Welcome to the QA Demo Application"
 
 def test_login_invalid(driver):
     driver.get("http://127.0.0.1:8001/")
-    wait = WebDriverWait(driver, 10)
-    username = wait.until(EC.visibility_of_element_located((By.ID, "username")))
-    password = driver.find_element(By.ID, "password")
-    login_btn = driver.find_element(By.ID, "login-button")
-    username.clear()
-    username.send_keys("invalid_user")
-    password.clear()
-    password.send_keys("WrongPassword123")
-    login_btn.click()
-    status = wait.until(EC.visibility_of_element_located((By.ID, "login-status")))
-    assert status.text == "Invalid username or password"
-    elems = driver.find_elements(By.ID, "dashboard-title")
-    if elems:
-        assert not elems[0].is_displayed()
-    else:
-        assert True
+    WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.ID, "username"))).send_keys("invalid_user")
+    driver.find_element(By.ID, "password").send_keys("WrongPassword123")
+    driver.find_element(By.ID, "login-button").click()
+    status_elem = WebDriverWait(driver, 10).until(EC.visibility_of_element_located((By.ID, "login-status")))
+    assert status_elem.text == "Invalid username or password"
+    dashboard_title = driver.find_element(By.ID, "dashboard-title")
+    assert not dashboard_title.is_displayed()
 
 def test_logout_skip():
     pytest.skip("Logout not implemented in the application")

@@ -35,20 +35,26 @@ jobs:
           chrome-version: stable
           install-chromedriver: true
 
-      - name: Configure Chrome and ChromeDriver
+      
+      - name: Set up Chrome
+        uses: browser-actions/setup-chrome@v2
+        id: setup-chrome
+        with:
+          chrome-version: stable
+          install-chromedriver: true
+
+      - name: Verify installed browser and driver
         shell: bash
         run: |
-          CHROME_PATH="${{ steps.setup-chrome.outputs.chrome-path }}"
-          DRIVER_PATH="${{ steps.setup-chrome.outputs.chromedriver-path }}"
+          echo "Installed Chrome:"
+          "${{ steps.setup-chrome.outputs.chrome-path }}" --version
 
-          echo "Chrome binary: $CHROME_PATH"
-          echo "ChromeDriver binary: $DRIVER_PATH"
+          echo "Installed ChromeDriver:"
+          "${{ steps.setup-chrome.outputs.chromedriver-path }}" --version
 
-          "$CHROME_PATH" --version
-          "$DRIVER_PATH" --version
+          echo "CHROME_BIN=${{ steps.setup-chrome.outputs.chrome-path }}" >> "$GITHUB_ENV"
+          echo "CHROMEDRIVER_PATH=${{ steps.setup-chrome.outputs.chromedriver-path }}" >> "$GITHUB_ENV"
 
-          echo "CHROME_BIN=$CHROME_PATH" >> "$GITHUB_ENV"
-          echo "CHROMEDRIVER_PATH=$DRIVER_PATH" >> "$GITHUB_ENV"
 
       - name: Start demo backend
         working-directory: demo-app/backend
