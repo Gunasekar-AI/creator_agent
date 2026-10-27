@@ -1,8 +1,9 @@
+
 name: Run AI Generated Tests After Merge
 
 on:
   pull_request:
-    types: [closed]
+    types: [merged]
     branches:
       - main
   workflow_dispatch:
@@ -16,10 +17,11 @@ jobs:
     if: >
       github.event_name == 'workflow_dispatch' ||
       github.event.pull_request.merged == true
+
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout main
+      - name: Checkout merged main
         uses: actions/checkout@v4
         with:
           ref: main
@@ -50,19 +52,29 @@ jobs:
         run: |
           for i in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8001/ > /dev/null; then
-              echo "Demo backend is ready"
+              echo "Demo application is ready"
               exit 0
             fi
             sleep 2
           done
+
           cat "$RUNNER_TEMP/fastapi.log"
           exit 1
 
       - name: Run generated UI tests
         env:
           BASE_URL: http://127.0.0.1:8001
-      - name: Run merged test runner
-        run: python -m app.run_merged_tests --branch main
+        run: |
+          xvfb-run -a python -m pytest -v --tb=short generated_tests
+
+      - name: Upload backend logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-backend-log
+          path: ${{ runner.temp }}/fastapi.log
+          if-no-files-found: ignore
+
 
 
 # name: Run AI Generated Tests After Merge
