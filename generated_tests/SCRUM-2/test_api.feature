@@ -1,6 +1,6 @@
 Feature: Login API with valid credentials
 
-  Scenario: Successful login
+Scenario: Successful login
     Given url 'http://127.0.0.1:8001/api/login'
     And request { username: 'testuser', password: 'Password123' }
     When method post
