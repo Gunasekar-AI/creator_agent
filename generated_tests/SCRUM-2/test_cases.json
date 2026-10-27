@@ -35,8 +35,7 @@
       "missing_details": [
         "login page URL",
         "invalid username",
-        "invalid password",
-        "error message text"
+        "invalid password"
       ]
     },
     {
@@ -67,11 +66,9 @@
       ],
       "expected_result": "API returns a successful response and authentication informations",
       "missing_details": [
-        "API endpoint URL",
+        "login API endpoint",
         "request payload format",
-        "valid username",
-        "valid password",
-        "structure of authentication informations"
+        "authentication information fields in response"
       ]
     }
   ]

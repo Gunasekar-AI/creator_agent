@@ -28,17 +28,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest selenium fastapi uvicorn pydantic
 
-      - name: Set up Chrome
-        uses: browser-actions/setup-chrome@v2
+      - name: Set up Chrome and ChromeDriver
         id: setup-chrome
-        with:
-          chrome-version: stable
-          install-chromedriver: true
-
-      
-      - name: Set up Chrome
         uses: browser-actions/setup-chrome@v2
-        id: setup-chrome
         with:
           chrome-version: stable
           install-chromedriver: true
@@ -46,15 +38,17 @@ jobs:
       - name: Verify installed browser and driver
         shell: bash
         run: |
+          CHROME_PATH="${{ steps.setup-chrome.outputs.chrome-path }}"
+          DRIVER_PATH="${{ steps.setup-chrome.outputs.chromedriver-path }}"
+
           echo "Installed Chrome:"
-          "${{ steps.setup-chrome.outputs.chrome-path }}" --version
+          "$CHROME_PATH" --version
 
           echo "Installed ChromeDriver:"
-          "${{ steps.setup-chrome.outputs.chromedriver-path }}" --version
+          "$DRIVER_PATH" --version
 
-          echo "CHROME_BIN=${{ steps.setup-chrome.outputs.chrome-path }}" >> "$GITHUB_ENV"
-          echo "CHROMEDRIVER_PATH=${{ steps.setup-chrome.outputs.chromedriver-path }}" >> "$GITHUB_ENV"
-
+          echo "CHROME_BIN=$CHROME_PATH" >> "$GITHUB_ENV"
+          echo "CHROMEDRIVER_PATH=$DRIVER_PATH" >> "$GITHUB_ENV"
 
       - name: Start demo backend
         working-directory: demo-app/backend
@@ -75,13 +69,11 @@ jobs:
             sleep 2
           done
 
+          echo "Demo backend failed to start. Backend logs:"
           cat "$RUNNER_TEMP/fastapi.log"
           exit 1
 
       - name: Run generated UI tests
-        env:
-          CHROME_BIN: ${{ env.CHROME_BIN }}
-          CHROMEDRIVER_PATH: ${{ env.CHROMEDRIVER_PATH }}
         run: |
           xvfb-run -a python -m pytest -v --tb=short generated_tests
 
@@ -92,6 +84,7 @@ jobs:
           name: demo-backend-log
           path: ${{ runner.temp }}/fastapi.log
           if-no-files-found: ignore
+
 
 
 
