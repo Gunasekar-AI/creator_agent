@@ -1,10 +1,68 @@
-- name: Start FastAPI demo application
-  working-directory: demo-app/backend
-  run: |
-    nohup python -m uvicorn main:app \
-      --host 127.0.0.1 \
-      --port 8000 \
-      > "$RUNNER_TEMP/fastapi.log" 2>&1 &
+name: Run AI Generated Tests After Merge
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  run-merged-tests:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest selenium fastapi uvicorn pydantic
+
+      - name: Set up Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Start demo backend
+        working-directory: demo-app/backend
+        run: |
+          nohup python -m uvicorn main:app \
+            --host 127.0.0.1 \
+            --port 8001 \
+            > "$RUNNER_TEMP/fastapi.log" 2>&1 &
+
+      - name: Wait for demo backend
+        run: |
+          for i in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8001/ > /dev/null; then
+              echo "Demo backend is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/fastapi.log"
+          exit 1
+
+      - name: Run generated UI tests
+        env:
+          BASE_URL: http://127.0.0.1:8001
+      - name: Run merged test runner
+        run: python -m app.run_merged_tests --branch main
 
 
 # name: Run AI Generated Tests After Merge
