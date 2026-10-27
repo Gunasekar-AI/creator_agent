@@ -265,6 +265,11 @@ Requirements:
     system_prompt = """
 You are an experienced test automation engineer.
 
+For invalid-login tests, verify the dashboard is not visible using
+Selenium's is_displayed(). Do not use presence_of_element_located()
+with pytest.raises(TimeoutException) to assert that the dashboard
+is absent or hidden.
+
 Return exactly one valid JSON object.
 The object must contain ui_pytest, api_karate, and missing_details.
 

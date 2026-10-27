@@ -51,6 +51,10 @@ def test_login_invalid_credentials(driver):
     )
     assert status_elem.text == "Invalid username or password"
     # Ensure dashboard is not displayed
+    dashboard = driver.find_element(By.ID, "dashboard-title")
+    assert not dashboard.is_displayed(), (
+        "Dashboard should not be visible after invalid login"
+    )
     with pytest.raises(TimeoutException):
         WebDriverWait(driver, 5).until(
             EC.presence_of_element_located((By.ID, "dashboard-title"))
