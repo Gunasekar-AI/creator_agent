@@ -192,6 +192,7 @@ def generate_automation_scripts(ticket, test_cases):
     """Generate Selenium pytest and Karate scripts from extracted cases."""
     description = jira_description_to_text(ticket.get("description"))
 
+  
     prompt = f"""
 JIRA TICKET
 -----------
@@ -200,41 +201,78 @@ Summary: {ticket.get('summary')}
 Description:
 {description}
 
-EXTRACTED TEST CASES
--------------------
+APPLICATION CONFIGURATION
+-------------------------
+This project uses the local QA demo application.
+
+UI:
+- Login page URL: http://127.0.0.1:8001/
+- Username field ID: username
+- Password field ID: password
+- Login button ID: login-button
+- Login status element ID: login-status
+- Dashboard title element ID: dashboard-title
+- Dashboard message element ID: dashboard-message
+- Valid username: testuser
+- Valid password: Password123
+- Invalid username: invalid_user
+- Invalid password: WrongPassword123
+- Invalid credentials message: Invalid username or password
+- Successful login message: Login successful
+- Dashboard title: Dashboard
+- Dashboard message: Welcome to the QA Demo Application
+- The application does not implement logout. Skip the logout test
+  with pytest.skip rather than inventing a logout button.
+
+API:
+- Login endpoint: http://127.0.0.1:8001/api/login
+- Method: POST
+- JSON request body:
+  {{"username": "testuser", "password": "Password123"}}
+- Expected successful response fields:
+  success, message, username
+- Expected successful values:
+  success=true, message="Login successful", username="testuser"
+
+TEST CASES
+----------
 {json.dumps(test_cases, indent=2)}
 
-Generate concise automation scripts using only the applicable test cases.
-
-UI REQUIREMENTS
-- Use Python Selenium and pytest.
-- Use explicit waits where appropriate.
-- Do not invent application URLs, locators, credentials, or expected results.
-- Use clear TODO placeholders for missing application-specific details.
-- Include meaningful assertions when the expected behavior is specified.
-- Do not mark a test as passed merely because an element was clicked.
-
-API REQUIREMENTS
-- Use Karate .feature syntax.
-- Use only API test cases.
-- Do not invent endpoints, payloads, authentication, or response schemas.
-- Use TODO placeholders for missing API contract details.
-- Do not assert an invented response field.
-
 OUTPUT REQUIREMENTS
+-------------------
 Return one valid JSON object with exactly these keys:
-- ui_pytest: string containing Python source code
-- api_karate: string containing Karate feature source
+- ui_pytest: string containing executable Python pytest source
+- api_karate: string containing a Karate feature
 - missing_details: array of strings
 
-Use an empty string for a script type with no applicable cases.
-Do not include Markdown fences or explanatory prose.
-Keep source code concise but preserve the required scenarios.
+Requirements:
+1. Use the exact application URLs, element IDs, credentials and messages
+   specified above. Never replace them with TODO placeholders.
+2. Use Selenium explicit waits.
+3. For valid login, verify the success message and dashboard elements.
+4. For invalid login, verify the exact error message and that the
+   dashboard is not displayed.
+5. For logout, use pytest.skip because logout is not implemented.
+6. Use the API endpoint and JSON payload specified above.
+7. In Karate, verify status 200 and the success, message and username
+   response fields.
+8. Use a Selenium ChromeOptions fixture with headless mode.
+9. Do not invent endpoints, selectors, or application behavior.
+10. Return an empty missing_details array for details supplied above.
+11. Return no Markdown fences or explanatory prose.
 """
 
     system_prompt = """
 You are an experienced test automation engineer.
 
+For invalid-login tests, verify the dashboard is not visible using
+Selenium's is_displayed(). Do not use presence_of_element_located()
+with pytest.raises(TimeoutException) to assert that the dashboard
+is absent or hidden.
+For invalid-login UI tests, verify that the dashboard is not visible
+using Selenium's is_displayed(). Do not use
+pytest.raises(TimeoutException) with presence_of_element_located()
+to verify that the dashboard is hidden.
 Return exactly one valid JSON object.
 The object must contain ui_pytest, api_karate, and missing_details.
 
@@ -249,6 +287,10 @@ Python requirements:
 - Include assertions for the expected behavior where possible.
 - Do not invent application details.
 - Do not truncate functions or statements.
+Use the APPLICATION CONFIGURATION in the user prompt as the
+source of truth. Never replace supplied values with TODO placeholders.
+Do not report supplied configuration values as missing.
+Generate tests only for behavior supported by the supplied configuration.
 
 Karate requirements:
 - Generate valid Karate feature syntax.

@@ -1,9 +1,1 @@
-Login page URL
-Valid username and password
-Invalid username and password
-Error message text
-Logout button selector
-Login page URL after redirect
-API endpoint URL
-Request payload format
-Authentication information fields
+
