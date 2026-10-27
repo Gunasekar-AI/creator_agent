@@ -301,6 +301,13 @@ Karate requirements:
 - Generate valid Karate feature syntax.
 - Do not invent API contract details.
 
+For local Windows execution:
+- Do not use headless mode.
+- Use webdriver.Chrome() and maximize the browser window.
+- In the pytest fixture teardown, wait for the user to press Enter
+  before calling driver.quit().
+- Use input("Press Enter to close Chrome...") for this pause.
+
 Keep the response concise. Do not repeat the test-case list.
 Do not return Markdown fences or text outside the JSON object.
 """
