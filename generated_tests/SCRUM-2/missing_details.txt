@@ -1,11 +1,9 @@
 Login page URL
-Username field selector
-Password field selector
-Login button selector
+Valid username and password
+Invalid username and password
 Error message text
 Logout button selector
-Logout redirect URL
+Login page URL after redirect
 API endpoint URL
 Request payload format
-Response schema
-Authentication token field
+Authentication information fields
