@@ -12,8 +12,6 @@ permissions:
 
 jobs:
   run-merged-tests:
-    if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
-
     runs-on: ubuntu-latest
 
     steps:
@@ -31,10 +29,16 @@ jobs:
           pip install pytest selenium fastapi uvicorn pydantic
 
       - name: Set up Chrome
-        uses: browser-actions/setup-chrome@v1
+        uses: browser-actions/setup-chrome@v2
+        id: setup-chrome
         with:
-          chrome-version: 155
+          chrome-version: stable
           install-chromedriver: true
+
+      - name: Verify Chrome versions
+        run: |
+          ${{ steps.setup-chrome.outputs.chrome-path }} --version
+          ${{ steps.setup-chrome.outputs.chromedriver-path }} --version
 
       - name: Start demo backend
         working-directory: demo-app/backend
@@ -67,6 +71,7 @@ jobs:
           name: demo-backend-log
           path: ${{ runner.temp }}/fastapi.log
           if-no-files-found: ignore
+
 
 # name: Run AI Generated Tests After Merge
 
