@@ -1,10 +1,11 @@
 Login page URL
-Valid username and password values
-Invalid username and password values
-Exact error message text
+Username field selector
+Password field selector
+Login button selector
+Error message text
 Logout button selector
-Login page URL after logout
+Logout redirect URL
 API endpoint URL
 Request payload format
-Valid credentials values
-Structure of successful response
+Response schema
+Authentication token field
