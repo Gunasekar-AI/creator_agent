@@ -34,7 +34,7 @@
       "missing_details": [
         "Login page URL",
         "Invalid username and password values",
-        "Error message text"
+        "Exact error message text"
       ]
     },
     {
@@ -49,7 +49,7 @@
       ],
       "expected_result": "User is logged out and redirected to the login page.",
       "missing_details": [
-        "Logout button selector",
+        "Logout button identifier",
         "Login page URL after logout"
       ]
     },
