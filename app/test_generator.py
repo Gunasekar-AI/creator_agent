@@ -1,6 +1,6 @@
 from pathlib import Path
 
-code = '''import ast
+import ast
 import json
 import os
 import re
@@ -421,8 +421,3 @@ if __name__ == "__main__":
     result = generate_scripts(ticket)
     print("Generation finished.")
     print(json.dumps(result, indent=2, ensure_ascii=False))
-'''
-
-path = Path("/mnt/data/test_generator.py")
-path.write_text(code, encoding="utf-8")
-print(f"Created updated file: {path} ({len(code.splitlines())} lines)")
