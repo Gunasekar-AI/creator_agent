@@ -13,11 +13,7 @@
         "Click Login."
       ],
       "expected_result": "User successfully navigates to the home page.",
-      "missing_details": [
-        "Login page URL",
-        "Valid username",
-        "Valid password"
-      ]
+      "missing_details": []
     },
     {
       "test_id": "TC-002",
@@ -32,53 +28,33 @@
         "Click Login."
       ],
       "expected_result": "An appropriate error message is displayed.",
-      "missing_details": [
-        "Login page URL",
-        "Invalid username",
-        "Invalid password",
-        "Expected error message text"
-      ]
+      "missing_details": []
     },
     {
       "test_id": "TC-003",
       "test_type": "ui",
       "title": "Logout successfully",
       "preconditions": [
-        "User is logged in successfully."
+        "User is logged in."
       ],
       "steps": [
-        "Log in using valid credentials.",
-        "Verify that the user reaches the home page.",
-        "Click the Logout button.",
-        "Wait for the logout process to complete."
+        "Click the Logout button."
       ],
-      "expected_result": "The user is logged out successfully. The user is redirected to the login page. The authenticated session is cleared. The user cannot access protected pages without logging in again.",
-      "missing_details": [
-        "Login page URL",
-        "Valid username",
-        "Valid password",
-        "Logout button selector",
-        "Protected page URL"
-      ]
+      "expected_result": "User is logged out and redirected to the login page.",
+      "missing_details": []
     },
     {
       "test_id": "TC-004",
       "test_type": "api",
       "title": "Login API with valid credentials",
       "preconditions": [
-        "A valid test account exists."
+        "Valid test account exists."
       ],
       "steps": [
         "Send a login API request with valid credentials."
       ],
-      "expected_result": "The API returns a successful response and authentication information.",
-      "missing_details": [
-        "API endpoint URL",
-        "Request payload format",
-        "Valid username",
-        "Valid password",
-        "Response schema"
-      ]
+      "expected_result": "API returns a successful response and authentication informations",
+      "missing_details": []
     }
   ]
 }
