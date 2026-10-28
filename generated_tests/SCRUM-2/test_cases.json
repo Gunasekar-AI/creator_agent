@@ -15,8 +15,9 @@
       "expected_result": "User successfully navigates to the home page.",
       "missing_details": [
         "Login page URL",
-        "Valid username",
-        "Valid password",
+        "Username field selector",
+        "Password field selector",
+        "Login button selector",
         "Home page URL"
       ]
     },
@@ -35,9 +36,10 @@
       "expected_result": "An appropriate error message is displayed.",
       "missing_details": [
         "Login page URL",
-        "Invalid username",
-        "Invalid password",
-        "Exact error message text"
+        "Username field selector",
+        "Password field selector",
+        "Login button selector",
+        "Error message text or selector"
       ]
     },
     {
@@ -68,9 +70,10 @@
       ],
       "expected_result": "API returns a successful response and authentication informations",
       "missing_details": [
-        "API endpoint URL",
+        "Login API endpoint URL",
         "Request payload format",
-        "Authentication information fields in response"
+        "Response schema details",
+        "Authentication token format"
       ]
     }
   ]
