@@ -1,1 +1,0 @@
-Expected HTTP status code for API login not provided; assumed 200.
