@@ -220,6 +220,7 @@ EXTRACTED TEST CASES
 --------------------
 {json.dumps(test_cases, indent=2, ensure_ascii=False)}
 
+
 APPLICATION CONFIGURATION
 -------------------------
 The following configuration is provided for the QA demo application.
@@ -228,7 +229,9 @@ UI base URL: http://127.0.0.1:8001/
 Username field ID: username
 Password field ID: password
 Login button ID: login-button
+Logout button ID: logout-button
 Login status element ID: login-status
+Dashboard section ID: dashboard-section
 Dashboard title element ID: dashboard-title
 Dashboard message element ID: dashboard-message
 
@@ -249,6 +252,7 @@ Valid API payload:
 
 Expected successful API response:
 success=true, message="Login successful", username="testuser"
+
 
 GENERATION RULES
 ----------------
@@ -271,18 +275,26 @@ GENERATION RULES
 6. For UI tests, use Selenium explicit waits and meaningful assertions.
    Verify both expected success and expected failure behavior.
 
-7. For logout tests:
-   - First log in with valid credentials if required.
-   - Use the logout control described by Jira and locate it using
-     an appropriate accessible name or visible text when possible.
-   - Click the control and wait for the expected redirect.
-   - Verify the logged-out state and that protected content is no
-     longer accessible, where specified by the application.
-   - Never call pytest.skip merely because the case is about logout.
-   - Do not assume logout works if the application does not implement it.
-   - If a required selector, route, or behavior is not specified and
-     cannot be established from the supplied configuration, report it
-     in missing_details rather than inventing implementation details.
+
+7. For TC-003 logout tests:
+   - Generate a real, executable Selenium test. Never use pytest.fail,
+     pytest.skip, pytest.mark.xfail, TODOs, or placeholder test steps
+     because a selector is supposedly missing.
+   - First log in with username testuser and password Password123.
+   - Wait until the element with ID dashboard-title is visible.
+   - Locate the logout button using exactly:
+     wd.find_element(By.ID, "logout-button")
+     or an explicit wait using:
+     (By.ID, "logout-button")
+   - Do not use By.LINK_TEXT, By.PARTIAL_LINK_TEXT, or guess a
+     different selector for the logout button.
+   - Click the logout button.
+   - Wait until the username field with ID username is visible.
+   - Verify that the dashboard section with ID dashboard-section
+     is hidden.
+   - The logout button selector is provided above and MUST NOT be
+     reported as missing.
+
 
 8. For invalid login, verify the specified error message and ensure
    the dashboard is not displayed.
