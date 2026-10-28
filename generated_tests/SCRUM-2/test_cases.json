@@ -13,7 +13,10 @@
         "Click Login."
       ],
       "expected_result": "User successfully navigates to the home page.",
-      "missing_details": []
+      "missing_details": [
+        "Login page URL",
+        "Valid username and password values"
+      ]
     },
     {
       "test_id": "TC-002",
@@ -28,7 +31,11 @@
         "Click Login."
       ],
       "expected_result": "An appropriate error message is displayed.",
-      "missing_details": []
+      "missing_details": [
+        "Login page URL",
+        "Invalid username and password values",
+        "Error message text"
+      ]
     },
     {
       "test_id": "TC-003",
@@ -41,7 +48,10 @@
         "Click the Logout button."
       ],
       "expected_result": "User is logged out and redirected to the login page.",
-      "missing_details": []
+      "missing_details": [
+        "Logout button selector",
+        "Login page URL after logout"
+      ]
     },
     {
       "test_id": "TC-004",
@@ -54,7 +64,11 @@
         "Send a login API request with valid credentials."
       ],
       "expected_result": "API returns a successful response and authentication informations",
-      "missing_details": []
+      "missing_details": [
+        "API endpoint URL",
+        "Request payload format",
+        "Authentication information fields in response"
+      ]
     }
   ]
 }
