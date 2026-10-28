@@ -13,12 +13,7 @@
         "Click Login."
       ],
       "expected_result": "User successfully navigates to the home page.",
-      "missing_details": [
-        "Login page URL",
-        "Username field selector",
-        "Password field selector",
-        "Login button selector"
-      ]
+      "missing_details": []
     },
     {
       "test_id": "TC-002",
@@ -33,46 +28,36 @@
         "Click Login."
       ],
       "expected_result": "An appropriate error message is displayed.",
-      "missing_details": [
-        "Login page URL",
-        "Username field selector",
-        "Password field selector",
-        "Login button selector",
-        "Expected error message text"
-      ]
+      "missing_details": []
     },
     {
       "test_id": "TC-003",
       "test_type": "ui",
       "title": "Logout successfully",
       "preconditions": [
-        "User is logged in."
+        "User is logged in successfully."
       ],
       "steps": [
-        "Click the Logout button."
+        "Log in using valid credentials.",
+        "Verify that the user reaches the home page.",
+        "Click the Logout button.",
+        "Wait for the logout process to complete."
       ],
-      "expected_result": "User is logged out and redirected to the login page.",
-      "missing_details": [
-        "Logout button selector",
-        "Login page URL after logout"
-      ]
+      "expected_result": "The user is logged out successfully. The user is redirected to the login page. The authenticated session is cleared. The user cannot access protected pages without logging in again.",
+      "missing_details": []
     },
     {
       "test_id": "TC-004",
       "test_type": "api",
       "title": "Login API with valid credentials",
       "preconditions": [
-        "Valid test account exists."
+        "A valid test account exists."
       ],
       "steps": [
         "Send a login API request with valid credentials."
       ],
-      "expected_result": "API returns a successful response and authentication informations",
-      "missing_details": [
-        "API endpoint URL",
-        "Request payload format",
-        "Authentication information fields in response"
-      ]
+      "expected_result": "The API returns a successful response and authentication information.",
+      "missing_details": []
     }
   ]
 }
