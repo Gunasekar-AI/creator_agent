@@ -56,77 +56,61 @@ def jira_description_to_text(value):
 
 
 def call_groq(system_prompt, user_prompt):
-    """Call Groq and retry JSON generation if validation fails."""
+    """Call Groq and return the model's JSON text response."""
     client = get_groq_client()
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {
-            "role": "user",
-            "content": (
-                user_prompt
-                + "\n\nReturn exactly one valid JSON object. "
-                "All source code must be inside JSON string values. "
-                "Escape newlines, quotes, and backslashes correctly. "
-                "Do not include Markdown fences or text outside JSON."
-            ),
-        },
-    ]
+    try:
+        response = client.chat.completions.create(
+            model=MODEL,
+            temperature=0,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=8192,
+            response_format={"type": "json_object"},
+        )
+    except BadRequestError as exc:
+        print("Groq rejected the script-generation request.")
+        print("Error details:", str(exc))
+        raise
 
-    for attempt in range(2):
-        try:
-            response = client.chat.completions.create(
-                model=MODEL,
-                temperature=0,
-                messages=messages,
-                max_tokens=8192,
-                response_format={"type": "json_object"},
-            )
+    choice = response.choices[0]
+    content = choice.message.content or ""
 
-            choice = response.choices[0]
-            content = choice.message.content or ""
+    print("\n--- GROQ RESPONSE DEBUG ---")
+    print("Finish reason:", choice.finish_reason)
+    print("Response content:")
+    print(repr(content))
+    print("--- END RESPONSE DEBUG ---\n")
 
-            print("Groq finish reason:", choice.finish_reason)
+    if choice.finish_reason == "length":
+        raise RuntimeError(
+            "Groq reached its output-token limit. "
+            "Reduce the requested script size or use a supported "
+            "model with a larger output limit."
+        )
 
-            if choice.finish_reason == "length":
-                raise RuntimeError(
-                    "Groq output was truncated. Reduce the generated "
-                    "script size or split UI and API generation."
-                )
+    if not content.strip():
+        raise RuntimeError("Groq returned an empty response.")
 
-            if not content.strip():
-                raise RuntimeError("Groq returned an empty response.")
+    return content
 
-            return content
-
-        except BadRequestError as exc:
-            print(f"Groq rejected generation (attempt {attempt + 1}/2).")
-            print("Provider error:", str(exc))
-
-            if attempt == 0:
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "Retry the complete response. Return a syntactically "
-                        "valid JSON object only. Use json.dumps-compatible "
-                        "escaping for all generated source code strings."
-                    ),
-                })
-            else:
-                raise RuntimeError(
-                    "Groq rejected JSON generation twice. Check the "
-                    "provider error above and simplify the prompt or "
-                    "generated output."
-                ) from exc
-
-    raise RuntimeError("Groq generation failed unexpectedly.")
 
 
 def parse_json_response(response_text):
-    """Parse JSON, including when the model wraps it in code fences."""
+    """Parse a Groq JSON response."""
     cleaned = response_text.strip()
-    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-    cleaned = re.sub(r"\s*```$", "", cleaned)
+
+    if cleaned.startswith("```"):
+        cleaned = re.sub(
+            r"^```(?:json)?\s*",
+            "",
+            cleaned,
+            count=1,
+            flags=re.IGNORECASE,
+        )
+        cleaned = re.sub(r"\s*```\s*$", "", cleaned)
 
     try:
         result = json.loads(cleaned)
@@ -141,14 +125,9 @@ def parse_json_response(response_text):
     return result
 
 
-def normalize_generated_code(code):
-    """
-    Normalize source returned as a JSON string by the model.
 
-    The outer response is decoded by json.loads(). Some model responses
-    nevertheless contain an additional escaping layer (literal \\n and \\" ).
-    Convert those only as needed, then validate the source before saving.
-    """
+def normalize_generated_code(code):
+    """Normalize source code returned inside a JSON string."""
     if not isinstance(code, str):
         return ""
 
@@ -156,20 +135,14 @@ def normalize_generated_code(code):
     if not code:
         return ""
 
-    # If the source is still one line and contains escaped newline markers,
-    # decode the extra escaping layer.
-    if "\n" not in code and r"\n" in code:
-        code = code.replace(r"\\n", "\n")
-        code = code.replace(r"\n", "\n")
-        code = code.replace(r"\r", "\r")
-
-    # Escaped quotes can remain even when newline characters are already real.
-    # Groq should return source code, not a second JSON-encoded string.
-    code = code.replace(r'\"', '"')
-
-    # Remove accidental Markdown fences if the model ignored the instruction.
-    code = re.sub(r"^\s*```(?:python|gherkin|karate|feature)?\s*", "", code)
-    code = re.sub(r"\s*```\s*$", "", code)
+    # Remove accidental Markdown fences.
+    code = re.sub(
+        r"^\s*```(?:python|gherkin|karate|feature)?\s*\n?",
+        "",
+        code,
+        flags=re.IGNORECASE,
+    )
+    code = re.sub(r"\n?```\s*$", "", code)
 
     return code.strip()
 
@@ -333,14 +306,36 @@ GENERATION RULES
     with the supplied information, document the exact missing
     information in missing_details.
 
-OUTPUT FORMAT
--------------
-Return exactly one valid JSON object with these keys:
-- ui_pytest: string containing executable Python pytest source
-- api_karate: string containing a Karate feature file
-- missing_details: array of strings
 
-Return no Markdown fences or explanatory text outside the JSON.
+OUTPUT FORMAT
+
+Return exactly one valid JSON object with these keys:
+- ui_pytest: a string containing complete executable Python pytest source
+- api_karate: a string containing a complete Karate feature file
+- missing_details: an array of strings
+
+JSON REQUIREMENTS:
+- Escape quotation marks, backslashes, and newline characters
+  correctly inside JSON strings.
+- Do not wrap the response in Markdown code fences.
+- Do not include explanatory text outside the JSON object.
+- Do not return Python dictionaries or JavaScript objects instead of JSON.
+- The response must be accepted by Python json.loads().
+
+TEST REQUIREMENTS:
+- Generate TC-001, TC-002, and TC-003 as executable Selenium tests.
+- Generate TC-004 as a Karate API test.
+- Do not use pytest.mark.xfail or empty pass test bodies.
+- Use the configured application URLs, selectors, credentials,
+  and expected messages.
+- For successful UI login, wait for the dashboard to become visible.
+  The login status element may be hidden after successful login.
+- For invalid login, verify the visible error message and hidden dashboard.
+- For logout, log in first, click the logout button, and verify
+  that the login form is visible and the dashboard is hidden.
+- Return an empty missing_details array when the provided configuration
+  is sufficient for these four test cases.
+
 """
 
     system_prompt = """

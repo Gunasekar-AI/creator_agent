@@ -1,2 +1,1 @@
-Logout button selector not provided for TC-003
-Logout redirect URL not provided for TC-003
+

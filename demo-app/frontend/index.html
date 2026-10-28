@@ -9,36 +9,45 @@
 <body>
     <h1>QA Reusability Demo Application</h1>
 
-    <h2>Login</h2>
+    <section id="login-section">
+        <h2>Login</h2>
 
-    <form id="login-form">
-        <label for="username">Username</label>
-        <input id="username" name="username" type="text" required>
+        <form id="login-form">
+            <label for="username">Username</label>
+            <input id="username" name="username" type="text" required>
 
-        <br><br>
+            <br><br>
 
-        <label for="password">Password</label>
-        <input id="password" name="password" type="password" required>
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" required>
 
-        <br><br>
+            <br><br>
 
-        <button id="login-button" type="submit">Login</button>
-    </form>
+            <button id="login-button" type="submit">Login</button>
+        </form>
 
-    <p id="login-status" role="status"></p>
+        <p id="login-status" role="status"></p>
+    </section>
 
-    <h2 id="dashboard-title" hidden>Dashboard</h2>
-    <p id="dashboard-message" hidden></p>
+    <section id="dashboard-section" hidden>
+        <h2 id="dashboard-title">Dashboard</h2>
+        <p id="dashboard-message"></p>
+        <button id="logout-button" type="button">Logout</button>
+    </section>
 
     <script>
         const form = document.getElementById("login-form");
+        const loginSection = document.getElementById("login-section");
+        const dashboardSection = document.getElementById("dashboard-section");
+        const status = document.getElementById("login-status");
 
         form.addEventListener("submit", async (event) => {
             event.preventDefault();
 
             const username = document.getElementById("username").value;
             const password = document.getElementById("password").value;
-            const status = document.getElementById("login-status");
+
+            status.textContent = "";
 
             try {
                 const response = await fetch("/api/login", {
@@ -47,21 +56,48 @@
                     body: JSON.stringify({ username, password })
                 });
 
+                if (!response.ok) {
+                    status.textContent = "Unable to connect to the server";
+                    return;
+                }
+
                 const result = await response.json();
                 status.textContent = result.message;
 
                 if (result.success) {
                     const dashboardResponse = await fetch("/api/dashboard");
+
+                    if (!dashboardResponse.ok) {
+                        status.textContent = "Unable to load dashboard";
+                        return;
+                    }
+
                     const dashboard = await dashboardResponse.json();
 
-                    document.getElementById("dashboard-title").hidden = false;
-                    document.getElementById("dashboard-message").hidden = false;
+                    document.getElementById("dashboard-title").textContent =
+                        dashboard.title;
                     document.getElementById("dashboard-message").textContent =
                         dashboard.message;
+
+                    loginSection.hidden = true;
+                    dashboardSection.hidden = false;
+                } else {
+                    // A failed login must not expose the dashboard.
+                    dashboardSection.hidden = true;
+                    loginSection.hidden = false;
                 }
             } catch {
                 status.textContent = "Unable to connect to the server";
             }
+        });
+
+        document.getElementById("logout-button").addEventListener("click", () => {
+            dashboardSection.hidden = true;
+            loginSection.hidden = false;
+
+            form.reset();
+            status.textContent = "";
+            document.getElementById("username").focus();
         });
     </script>
 </body>
