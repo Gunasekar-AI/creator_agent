@@ -98,19 +98,20 @@ def call_groq(system_prompt, user_prompt):
 
 
 
+
+
 def parse_json_response(response_text):
     """Parse a Groq JSON response."""
     cleaned = response_text.strip()
 
-    if cleaned.startswith("```"):
-        cleaned = re.sub(
-            r"^```(?:json)?\s*",
-            "",
-            cleaned,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-        cleaned = re.sub(r"\s*```\s*$", "", cleaned)
+    cleaned = re.sub(
+        r"^\s*```(?:json)?\s*",
+        "",
+        cleaned,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\s*```\s*$", "", cleaned)
 
     try:
         result = json.loads(cleaned)
@@ -125,6 +126,25 @@ def parse_json_response(response_text):
     return result
 
 
+def normalize_generated_code(code):
+    """Remove optional Markdown fences from generated source."""
+    if not isinstance(code, str):
+        return ""
+
+    code = code.strip()
+    code = re.sub(
+        r"^\s*```(?:python|gherkin|karate|feature)?[ \t]*\r?\n?",
+        "",
+        code,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    code = re.sub(r"\r?\n?```[ \t]*$", "", code)
+
+    return code.strip()
+
+
+
 
 def normalize_generated_code(code):
     """Normalize source code returned inside a JSON string."""
@@ -135,17 +155,21 @@ def normalize_generated_code(code):
     if not code:
         return ""
 
-    # Remove accidental Markdown fences.
+    # Remove optional Markdown code fences.
     code = re.sub(
-        r"^\s*```(?:python|gherkin|karate|feature)?\s*\n?",
+        r"^\s*```(?:python|gherkin|karate|feature)?[ \t]*\r?\n?",
         "",
         code,
+        count=1,
         flags=re.IGNORECASE,
     )
-    code = re.sub(r"\n?```\s*$", "", code)
+    code = re.sub(
+        r"\r?\n?```[ \t]*$",
+        "",
+        code,
+    )
 
     return code.strip()
-
 
 def extract_test_cases(ticket):
     """Use Groq to extract structured test cases from a Jira ticket."""
@@ -201,8 +225,9 @@ Rules:
 
 
 
+
 def generate_automation_scripts(ticket, test_cases):
-    """Generate UI and API automation from Jira test cases using Groq."""
+    """Generate and validate UI and API automation scripts using Groq."""
     description = jira_description_to_text(ticket.get("description"))
 
     prompt = f"""
@@ -220,10 +245,9 @@ EXTRACTED TEST CASES
 --------------------
 {json.dumps(test_cases, indent=2, ensure_ascii=False)}
 
-
 APPLICATION CONFIGURATION
 -------------------------
-The following configuration is provided for the QA demo application.
+Use these exact values for the QA demo application.
 
 UI base URL: http://127.0.0.1:8001/
 Username field ID: username
@@ -247,154 +271,159 @@ Dashboard message: Welcome to the QA Demo Application
 
 API endpoint: http://127.0.0.1:8001/api/login
 API method: POST
+
 Valid API payload:
 {{"username": "testuser", "password": "Password123"}}
 
 Expected successful API response:
-success=true, message="Login successful", username="testuser"
-
+success=true
+message="Login successful"
+username="testuser"
 
 GENERATION RULES
 ----------------
-1. Jira description and extracted test cases determine which tests
-   must be generated. Do not omit a case merely because its title
-   mentions logout or another authentication operation.
+1. Use the Jira description and extracted test cases as the source
+   of truth for the requested test coverage.
 
-2. Generate Selenium pytest tests for UI cases and Karate feature
-   scenarios for API cases.
+2. Generate Selenium pytest tests for UI cases and Karate scenarios
+   for API cases.
 
-3. Preserve Jira test case IDs and cover each case with an appropriate
-   automated test.
+3. Preserve the test IDs and generate executable tests for all
+   requested cases. Do not silently omit any case.
 
-4. Generate executable code, not pseudocode, placeholders, or TODOs.
+4. Never generate pseudocode, TODOs, empty test bodies, or placeholder
+   failures for a requested test case.
 
-5. Use the application configuration above where it applies.
-   Do not invent URLs, API endpoints, credentials, element IDs,
-   success messages, or backend behavior.
+5. Use the application configuration above. Do not invent selectors,
+   URLs, endpoints, credentials, messages, or application behavior.
 
-6. For UI tests, use Selenium explicit waits and meaningful assertions.
-   Verify both expected success and expected failure behavior.
+6. Use Selenium explicit waits and meaningful assertions.
 
-
-7. For TC-003 logout tests:
-   - Generate a real, executable Selenium test. Never use pytest.fail,
-     pytest.skip, pytest.mark.xfail, TODOs, or placeholder test steps
-     because a selector is supposedly missing.
-   - First log in with username testuser and password Password123.
+7. TC-001: Valid login
+   - Open the configured UI base URL.
+   - Enter testuser and Password123.
+   - Click the element with ID login-button.
    - Wait until the element with ID dashboard-title is visible.
-   - Locate the logout button using exactly:
-     wd.find_element(By.ID, "logout-button")
-     or an explicit wait using:
-     (By.ID, "logout-button")
-   - Do not use By.LINK_TEXT, By.PARTIAL_LINK_TEXT, or guess a
-     different selector for the logout button.
+   - Assert the title is Dashboard.
+   - Assert the dashboard message is Welcome to the QA Demo Application.
+   - Do not wait for login-status to remain visible after successful
+     login because the login form may be hidden.
+
+8. TC-002: Invalid login
+   - Open the configured UI base URL.
+   - Enter invalid_user and WrongPassword123.
+   - Click the element with ID login-button.
+   - Wait until login-status is visible.
+   - Assert its text is Invalid username or password.
+   - Assert dashboard-section is hidden.
+
+9. TC-003: Logout successfully
+   - Generate a real Selenium test named
+     test_tc_003_logout_successfully.
+   - Log in first using testuser and Password123.
+   - Wait until dashboard-title is visible.
+   - Locate the logout button using its exact ID:
+     By.ID, "logout-button".
+   - Use WebDriverWait and element_to_be_clickable if appropriate.
    - Click the logout button.
    - Wait until the username field with ID username is visible.
-   - Verify that the dashboard section with ID dashboard-section
-     is hidden.
-   - The logout button selector is provided above and MUST NOT be
-     reported as missing.
+   - Verify that dashboard-section is hidden.
+   - Do not use By.LINK_TEXT or guess another selector.
+   - Never generate pytest.fail(), pytest.skip(), pytest.mark.xfail,
+     or a missing-selector placeholder for this test.
+   - The logout selector is provided and must not be reported missing.
 
+10. Use a pytest fixture with yield and ensure the browser is closed
+    in teardown, even if a test fails.
 
-8. For invalid login, verify the specified error message and ensure
-   the dashboard is not displayed.
-
-9. Use a pytest fixture that always closes the browser in teardown.
-   Do not pause for keyboard input.
-
-10. Support both local Windows execution and GitHub Actions:
+11. Support local Windows and GitHub Actions:
     - Do not force headless mode.
-    - Use a 1920x1080 browser window.
-    - If CHROME_BIN is set, use it as the Chrome binary.
-    - If CHROMEDRIVER_PATH is set, use it as the ChromeDriver service.
-    - If these environment variables are absent, allow Selenium to
-      use its normal local browser/driver discovery.
+    - Set browser window size to 1920x1080.
+    - If CHROME_BIN is set, configure Chrome's binary location.
+    - If CHROMEDRIVER_PATH is set, use it for ChromeDriver.
+    - Otherwise use Selenium's normal browser and driver discovery.
+    - Never pause for keyboard input.
 
-11. Generate API tests only for API cases identified in Jira.
-    Use the supplied API configuration where applicable.
-    Do not invent additional endpoints or response fields.
+12. Generate API tests only for API cases identified in Jira.
+    Generate TC-004 as a Karate API test using the configured endpoint,
+    HTTP method, payload, and expected response fields.
 
-12. Do not silently omit test cases. If a case cannot be automated
-    with the supplied information, document the exact missing
-    information in missing_details.
-
+13. Do not claim behavior that is unsupported by the supplied
+    configuration. If genuinely required information is missing,
+    report it in missing_details.
 
 OUTPUT FORMAT
-
+-------------
 Return exactly one valid JSON object with these keys:
-- ui_pytest: a string containing complete executable Python pytest source
-- api_karate: a string containing a complete Karate feature file
-- missing_details: an array of strings
+- ui_pytest: complete executable Python pytest source as a JSON string
+- api_karate: complete Karate feature source as a JSON string
+- missing_details: JSON array of strings
 
-JSON REQUIREMENTS:
-- Escape quotation marks, backslashes, and newline characters
-  correctly inside JSON strings.
-- Do not wrap the response in Markdown code fences.
-- Do not include explanatory text outside the JSON object.
-- Do not return Python dictionaries or JavaScript objects instead of JSON.
-- The response must be accepted by Python json.loads().
+Return no Markdown fences and no explanatory text outside the JSON.
 
-TEST REQUIREMENTS:
+TEST REQUIREMENTS
+-----------------
 - Generate TC-001, TC-002, and TC-003 as executable Selenium tests.
 - Generate TC-004 as a Karate API test.
+- Include all imports, fixtures, and required test functions.
 - Do not use pytest.mark.xfail or empty pass test bodies.
-- Use the configured application URLs, selectors, credentials,
-  and expected messages.
-- For successful UI login, wait for the dashboard to become visible.
-  The login status element may be hidden after successful login.
-- For invalid login, verify the visible error message and hidden dashboard.
-- For logout, log in first, click the logout button, and verify
-  that the login form is visible and the dashboard is hidden.
-- Return an empty missing_details array when the provided configuration
-  is sufficient for these four test cases.
-
+- Use the exact configured selectors, URLs, credentials, and messages.
+- For TC-003, use the ID logout-button and verify the logged-out state.
+- Return an empty missing_details array when the supplied
+  configuration is sufficient for the four test cases.
 """
 
     system_prompt = """
 You are a senior test automation engineer.
 
-Treat the Jira description and extracted test cases as the source
-of truth for the requested test coverage.
+Generate complete, syntactically valid automation source code from
+the supplied Jira test cases and application configuration.
 
-Generate complete, syntactically valid automation scripts.
-Do not automatically skip a requested test case.
-Do not fabricate application functionality, selectors, endpoints,
-credentials, or expected results.
+Return exactly one valid JSON object containing:
+ui_pytest, api_karate, and missing_details.
 
-Python:
+Python requirements:
 - Use pytest and Selenium for UI tests.
-- Include the imports and fixtures required by the generated tests.
-- Use Selenium explicit waits.
-- Use normal Python syntax and meaningful assertions.
-- Use unique, descriptive test function names.
-- Ensure browser teardown happens even when a test fails.
-- Use environment-configured Chrome and ChromeDriver when available.
-- Never use input() to pause a test.
-- Do not use headless mode unless the supplied requirements explicitly
-  request it.
-- Do not assert that an element is absent by expecting a timeout
-  from presence_of_element_located. Use appropriate visibility checks.
+- Include all required imports and a working browser fixture.
+- Use explicit waits and meaningful assertions.
+- Always close the browser in fixture teardown.
+- Support CHROME_BIN and CHROMEDRIVER_PATH when configured.
+- Do not force headless mode.
+- Do not use input(), TODOs, empty tests, or placeholder failures.
+- Do not skip requested test cases.
+- Use dashboard visibility to confirm successful login.
+- Use the exact logout selector By.ID, "logout-button".
+- The configured logout selector is not missing.
+- The TC-003 test must click logout and verify the logged-out state.
 
-Karate:
+Karate requirements:
 - Generate valid Karate feature syntax.
-- Use only API details supplied in the configuration or Jira.
-- Verify the status and response fields specified by the test case.
+- Use only supplied API details.
+- Verify the expected HTTP status and response fields.
 
-Missing information:
-- Return missing_details for required application details that cannot
-  be established from the supplied information.
-- Do not list configuration values already provided as missing.
-- Do not claim a requested behavior is implemented without evidence.
+Missing-information requirements:
+- Report only information genuinely required but not supplied.
+- Do not list configuration values that are already provided.
+- Do not claim application behavior that is unsupported.
 
-Return exactly one JSON object containing ui_pytest, api_karate,
-and missing_details. Source code values must be JSON strings.
+JSON requirements:
+- Source code values must be valid JSON strings.
+- Escape quotation marks, backslashes, and newline characters.
+- Return no Markdown fences or explanatory text.
 """
 
-    result = parse_json_response(
-        call_groq(system_prompt, prompt)
+    # Ask Groq to generate the scripts.
+    raw_response = call_groq(system_prompt, prompt)
+    result = parse_json_response(raw_response)
+
+    # Validate the response structure.
+    required_keys = (
+        "ui_pytest",
+        "api_karate",
+        "missing_details",
     )
 
-    for key in ("ui_pytest", "api_karate", "missing_details"):
+    for key in required_keys:
         if key not in result:
             raise ValueError(
                 f"Groq response is missing the required key: {key}"
@@ -403,6 +432,7 @@ and missing_details. Source code values must be JSON strings.
     if not isinstance(result["missing_details"], list):
         raise ValueError("missing_details must be a JSON array.")
 
+    # Normalize generated source code.
     result["ui_pytest"] = normalize_generated_code(
         result["ui_pytest"]
     )
@@ -410,12 +440,76 @@ and missing_details. Source code values must be JSON strings.
         result["api_karate"]
     )
 
-    if result["ui_pytest"]:
-        ast.parse(result["ui_pytest"])
+    ui_script = result["ui_pytest"]
+    api_script = result["api_karate"]
 
-    if result["api_karate"] and "Feature:" not in result["api_karate"]:
+    # Validate Python syntax.
+    if not ui_script:
+        raise ValueError("Groq generated an empty UI pytest script.")
+
+    try:
+        ast.parse(ui_script)
+    except SyntaxError as exc:
         raise ValueError(
-            "Generated Karate script is missing its Feature declaration."
+            f"Generated UI script has invalid Python syntax: {exc}"
+        ) from exc
+
+    # Validate the required UI test functions.
+    required_ui_tests = (
+        "test_tc_001_login_with_valid_credentials",
+        "test_tc_002_login_with_invalid_credentials",
+        "test_tc_003_logout_successfully",
+    )
+
+    for test_name in required_ui_tests:
+        if not re.search(
+            rf"^\s*def\s+{re.escape(test_name)}\s*\(",
+            ui_script,
+            flags=re.MULTILINE,
+        ):
+            raise ValueError(
+                f"Generated UI script is missing {test_name}."
+            )
+
+    # Reject the known placeholder failure.
+    if "Missing logout button selector" in ui_script:
+        raise ValueError(
+            "Generated UI script contains a missing-selector "
+            "placeholder for TC-003. Regenerate the scripts."
+        )
+
+    # Ensure the logout test uses the configured selector.
+    logout_match = re.search(
+        r"def\s+test_tc_003_logout_successfully\s*\(.*?\):"
+        r"(?P<body>.*?)(?=\n\s*def\s+|\Z)",
+        ui_script,
+        flags=re.DOTALL,
+    )
+
+    if not logout_match:
+        raise ValueError("Could not locate the TC-003 logout test.")
+
+    logout_body = logout_match.group("body")
+
+    if "logout-button" not in logout_body:
+        raise ValueError(
+            "TC-003 does not use the configured logout-button ID."
+        )
+
+    if "pytest.fail(" in logout_body or "pytest.skip(" in logout_body:
+        raise ValueError(
+            "TC-003 contains a placeholder failure or skip."
+        )
+
+    # Validate the Karate feature.
+    if not api_script or not re.search(
+        r"^\s*Feature\s*:",
+        api_script,
+        flags=re.MULTILINE,
+    ):
+        raise ValueError(
+            "Generated Karate script is empty or missing its "
+            "Feature declaration."
         )
 
     return result
