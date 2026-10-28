@@ -2,60 +2,69 @@ import os
 import pytest
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service as ChromeService
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service
 
 BASE_URL = "http://127.0.0.1:8001/"
+USERNAME = "testuser"
+PASSWORD = "Password123"
+INVALID_USERNAME = "invalid_user"
+INVALID_PASSWORD = "WrongPassword123"
+LOGIN_STATUS_ID = "login-status"
+DASHBOARD_TITLE_ID = "dashboard-title"
+SUCCESS_MESSAGE = "Login successful"
+ERROR_MESSAGE = "Invalid username or password"
 
-@pytest.fixture(scope="function")
+@pytest.fixture
 def driver():
-    chrome_options = webdriver.ChromeOptions()
-    chrome_options.add_argument("--window-size=1920,1080")
-    if os.getenv("CHROME_BIN"):
-        chrome_options.binary_location = os.getenv("CHROME_BIN")
+    options = webdriver.ChromeOptions()
+    options.add_argument("--window-size=1920,1080")
+    chrome_bin = os.getenv("CHROME_BIN")
+    if chrome_bin:
+        options.binary_location = chrome_bin
     driver_path = os.getenv("CHROMEDRIVER_PATH")
     if driver_path:
-        service = Service(driver_path)
-        wd = webdriver.Chrome(service=service, options=chrome_options)
+        service = ChromeService(executable_path=driver_path)
+        wd = webdriver.Chrome(service=service, options=options)
     else:
-        wd = webdriver.Chrome(options=chrome_options)
+        wd = webdriver.Chrome(options=options)
     yield wd
     wd.quit()
 
-def login(driver, username, password):
-    driver.get(BASE_URL)
-    wait = WebDriverWait(driver, 10)
-    wait.until(EC.visibility_of_element_located((By.ID, "username"))).clear()
-    driver.find_element(By.ID, "username").send_keys(username)
-    driver.find_element(By.ID, "password").clear()
-    driver.find_element(By.ID, "password").send_keys(password)
-    driver.find_element(By.ID, "login-button").click()
-    wait.until(EC.visibility_of_element_located((By.ID, "login-status")))
+def login(wd, username, password):
+    wd.get(BASE_URL)
+    wait = WebDriverWait(wd, 10)
+    wait.until(EC.presence_of_element_located((By.ID, "username"))).clear()
+    wd.find_element(By.ID, "username").send_keys(username)
+    wd.find_element(By.ID, "password").clear()
+    wd.find_element(By.ID, "password").send_keys(password)
+    wd.find_element(By.ID, "login-button").click()
 
 def test_tc_001_login_with_valid_credentials(driver):
-    login(driver, "testuser", "Password123")
+    login(driver, USERNAME, PASSWORD)
     wait = WebDriverWait(driver, 10)
-    dashboard_title = wait.until(EC.visibility_of_element_located((By.ID, "dashboard-title")))
+    status_elem = wait.until(EC.visibility_of_element_located((By.ID, LOGIN_STATUS_ID)))
+    assert status_elem.text == SUCCESS_MESSAGE
+    dashboard_title = wait.until(EC.visibility_of_element_located((By.ID, DASHBOARD_TITLE_ID)))
     assert dashboard_title.text == "Dashboard"
-    dashboard_message = driver.find_element(By.ID, "dashboard-message")
-    assert dashboard_message.text == "Welcome to the QA Demo Application"
 
 def test_tc_002_login_with_invalid_credentials(driver):
-    login(driver, "invalid_user", "WrongPassword123")
+    login(driver, INVALID_USERNAME, INVALID_PASSWORD)
     wait = WebDriverWait(driver, 10)
-    login_status = wait.until(EC.visibility_of_element_located((By.ID, "login-status")))
-    assert login_status.text == "Invalid username or password"
+    status_elem = wait.until(EC.visibility_of_element_located((By.ID, LOGIN_STATUS_ID)))
+    assert status_elem.text == ERROR_MESSAGE
     # Ensure dashboard is not displayed
-    assert len(driver.find_elements(By.ID, "dashboard-title")) == 0
+    dashboard_elements = driver.find_elements(By.ID, DASHBOARD_TITLE_ID)
+    assert len(dashboard_elements) == 0
 
 def test_tc_003_logout_successfully(driver):
     # Precondition: user is logged in
-    login(driver, "testuser", "Password123")
+    login(driver, USERNAME, PASSWORD)
     wait = WebDriverWait(driver, 10)
-    wait.until(EC.visibility_of_element_located((By.ID, "dashboard-title")))
-    # Missing logout button selector - cannot locate logout control
-    # Missing protected page URL to verify access after logout
-    # Placeholder for logout steps
-    # TODO: Implement logout when selector and protected page URL are available
-    assert True  # Placeholder assertion
+    wait.until(EC.visibility_of_element_located((By.ID, DASHBOARD_TITLE_ID)))
+    # Click logout - selector not provided
+    # Missing selector for logout button
+    raise NotImplementedError("Logout button selector is missing. Cannot locate logout control.")
+    # After logout, verify redirected to login page and session cleared
+    # Additional steps would be implemented once selector and protected page URL are known.

@@ -1,2 +1,2 @@
-Logout button selector not provided for TC-003
-Protected page URL not provided to verify access after logout for TC-003
+Logout button selector
+Protected page URL
