@@ -41,13 +41,26 @@ def test_tc_001_login_with_valid_credentials(driver):
     dashboard_message = driver.find_element(By.ID, "dashboard-message")
     assert dashboard_message.text == "Welcome to the QA Demo Application"
 
+
 def test_tc_002_login_with_invalid_credentials(driver):
     login(driver, "invalid_user", "WrongPassword123")
+
     wait = WebDriverWait(driver, 10)
-    login_status = wait.until(EC.visibility_of_element_located((By.ID, "login-status")))
+    login_status = wait.until(
+        EC.visibility_of_element_located((By.ID, "login-status"))
+    )
+
+    # Verify the invalid-login error message
     assert login_status.text == "Invalid username or password"
-    # Ensure dashboard is not displayed
-    assert len(driver.find_elements(By.ID, "dashboard-title")) == 0
+
+    # Ensure the dashboard is not visible
+    dashboard_elements = driver.find_elements(
+        By.ID, "dashboard-title"
+    )
+    assert not any(
+        element.is_displayed() for element in dashboard_elements
+    ), "Dashboard should not be visible after invalid login"
+
 
 def test_tc_003_logout_successfully(driver):
     # Precondition: user is logged in
