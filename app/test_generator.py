@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from selenium import webdriver
-
+from groq import Groq, BadRequestError
 from dotenv import load_dotenv
 from groq import Groq
 
@@ -54,40 +54,72 @@ def jira_description_to_text(value):
     return str(value)
 
 
+
 def call_groq(system_prompt, user_prompt):
-    """Call Groq and return the model's text response."""
+    """Call Groq and retry JSON generation if validation fails."""
     client = get_groq_client()
 
-    response = client.chat.completions.create(
-        model=MODEL,
-        temperature=0.1,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        max_tokens=8192,
-        response_format={"type": "json_object"},
-    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "user",
+            "content": (
+                user_prompt
+                + "\n\nReturn exactly one valid JSON object. "
+                "All source code must be inside JSON string values. "
+                "Escape newlines, quotes, and backslashes correctly. "
+                "Do not include Markdown fences or text outside JSON."
+            ),
+        },
+    ]
 
-    choice = response.choices[0]
-    content = choice.message.content or ""
+    for attempt in range(2):
+        try:
+            response = client.chat.completions.create(
+                model=MODEL,
+                temperature=0,
+                messages=messages,
+                max_tokens=8192,
+                response_format={"type": "json_object"},
+            )
 
-    print("\n--- GROQ RESPONSE DEBUG ---")
-    print("Finish reason:", choice.finish_reason)
-    print("Response content:")
-    print(repr(content))
-    print("--- END RESPONSE DEBUG ---\n")
+            choice = response.choices[0]
+            content = choice.message.content or ""
 
-    if choice.finish_reason == "length":
-        raise RuntimeError(
-            "Groq reached its completion-token limit. Reduce the requested "
-            "output or use a model with a larger supported output limit."
-        )
+            print("Groq finish reason:", choice.finish_reason)
 
-    if not content.strip():
-        raise RuntimeError("Groq returned an empty response.")
+            if choice.finish_reason == "length":
+                raise RuntimeError(
+                    "Groq output was truncated. Reduce the generated "
+                    "script size or split UI and API generation."
+                )
 
-    return content
+            if not content.strip():
+                raise RuntimeError("Groq returned an empty response.")
+
+            return content
+
+        except BadRequestError as exc:
+            print(f"Groq rejected generation (attempt {attempt + 1}/2).")
+            print("Provider error:", str(exc))
+
+            if attempt == 0:
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Retry the complete response. Return a syntactically "
+                        "valid JSON object only. Use json.dumps-compatible "
+                        "escaping for all generated source code strings."
+                    ),
+                })
+            else:
+                raise RuntimeError(
+                    "Groq rejected JSON generation twice. Check the "
+                    "provider error above and simplify the prompt or "
+                    "generated output."
+                ) from exc
+
+    raise RuntimeError("Groq generation failed unexpectedly.")
 
 
 def parse_json_response(response_text):
