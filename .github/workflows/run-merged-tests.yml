@@ -53,6 +53,20 @@ jobs:
           done
           echo "Demo backend failed to start. Backend logs:"
           cat "$RUNNER_TEMP/fastapi.log"; exit 1
+      
+      - name: Verify Chrome and ChromeDriver
+        shell: bash
+        run: |
+          echo "Chrome binary:"
+          "$CHROME_BIN" --version
+
+          echo "ChromeDriver binary:"
+          "$CHROMEDRIVER_PATH" --version
+
+      - name: Run generated UI tests
+        run: |
+          xvfb-run -a python -m pytest -v --tb=short generated_tests
+
 
       - name: Run generated UI tests
         run: xvfb-run -a python -m pytest -v --tb=short generated_tests

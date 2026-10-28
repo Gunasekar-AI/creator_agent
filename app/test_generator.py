@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from selenium import webdriver
-
+from groq import Groq, BadRequestError
 from dotenv import load_dotenv
 from groq import Groq
 
@@ -54,40 +54,72 @@ def jira_description_to_text(value):
     return str(value)
 
 
+
 def call_groq(system_prompt, user_prompt):
-    """Call Groq and return the model's text response."""
+    """Call Groq and retry JSON generation if validation fails."""
     client = get_groq_client()
 
-    response = client.chat.completions.create(
-        model=MODEL,
-        temperature=0.1,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        max_tokens=8192,
-        response_format={"type": "json_object"},
-    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {
+            "role": "user",
+            "content": (
+                user_prompt
+                + "\n\nReturn exactly one valid JSON object. "
+                "All source code must be inside JSON string values. "
+                "Escape newlines, quotes, and backslashes correctly. "
+                "Do not include Markdown fences or text outside JSON."
+            ),
+        },
+    ]
 
-    choice = response.choices[0]
-    content = choice.message.content or ""
+    for attempt in range(2):
+        try:
+            response = client.chat.completions.create(
+                model=MODEL,
+                temperature=0,
+                messages=messages,
+                max_tokens=8192,
+                response_format={"type": "json_object"},
+            )
 
-    print("\n--- GROQ RESPONSE DEBUG ---")
-    print("Finish reason:", choice.finish_reason)
-    print("Response content:")
-    print(repr(content))
-    print("--- END RESPONSE DEBUG ---\n")
+            choice = response.choices[0]
+            content = choice.message.content or ""
 
-    if choice.finish_reason == "length":
-        raise RuntimeError(
-            "Groq reached its completion-token limit. Reduce the requested "
-            "output or use a model with a larger supported output limit."
-        )
+            print("Groq finish reason:", choice.finish_reason)
 
-    if not content.strip():
-        raise RuntimeError("Groq returned an empty response.")
+            if choice.finish_reason == "length":
+                raise RuntimeError(
+                    "Groq output was truncated. Reduce the generated "
+                    "script size or split UI and API generation."
+                )
 
-    return content
+            if not content.strip():
+                raise RuntimeError("Groq returned an empty response.")
+
+            return content
+
+        except BadRequestError as exc:
+            print(f"Groq rejected generation (attempt {attempt + 1}/2).")
+            print("Provider error:", str(exc))
+
+            if attempt == 0:
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Retry the complete response. Return a syntactically "
+                        "valid JSON object only. Use json.dumps-compatible "
+                        "escaping for all generated source code strings."
+                    ),
+                })
+            else:
+                raise RuntimeError(
+                    "Groq rejected JSON generation twice. Check the "
+                    "provider error above and simplify the prompt or "
+                    "generated output."
+                ) from exc
+
+    raise RuntimeError("Groq generation failed unexpectedly.")
 
 
 def parse_json_response(response_text):
@@ -195,136 +227,160 @@ Rules:
     return result
 
 
+
 def generate_automation_scripts(ticket, test_cases):
-    """Generate Selenium pytest and Karate scripts from extracted cases."""
+    """Generate UI and API automation from Jira test cases using Groq."""
     description = jira_description_to_text(ticket.get("description"))
 
-  
     prompt = f"""
-JIRA TICKET
------------
+JIRA ISSUE
+----------
 Issue: {ticket.get('issue_key')}
 Summary: {ticket.get('summary')}
-Description:
+Issue type: {ticket.get('issue_type')}
+
+JIRA DESCRIPTION
+----------------
 {description}
+
+EXTRACTED TEST CASES
+--------------------
+{json.dumps(test_cases, indent=2, ensure_ascii=False)}
 
 APPLICATION CONFIGURATION
 -------------------------
-This project uses the local QA demo application.
+The following configuration is provided for the QA demo application.
 
-UI:
-- Login page URL: http://127.0.0.1:8001/
-- Username field ID: username
-- Password field ID: password
-- Login button ID: login-button
-- Login status element ID: login-status
-- Dashboard title element ID: dashboard-title
-- Dashboard message element ID: dashboard-message
-- Valid username: testuser
-- Valid password: Password123
-- Invalid username: invalid_user
-- Invalid password: WrongPassword123
-- Invalid credentials message: Invalid username or password
-- Successful login message: Login successful
-- Dashboard title: Dashboard
-- Dashboard message: Welcome to the QA Demo Application
-- The application does not implement logout. Skip the logout test
-  with pytest.skip rather than inventing a logout button.
+UI base URL: http://127.0.0.1:8001/
+Username field ID: username
+Password field ID: password
+Login button ID: login-button
+Login status element ID: login-status
+Dashboard title element ID: dashboard-title
+Dashboard message element ID: dashboard-message
 
-API:
-- Login endpoint: http://127.0.0.1:8001/api/login
-- Method: POST
-- JSON request body:
-  {{"username": "testuser", "password": "Password123"}}
-- Expected successful response fields:
-  success, message, username
-- Expected successful values:
-  success=true, message="Login successful", username="testuser"
+Valid username: testuser
+Valid password: Password123
+Invalid username: invalid_user
+Invalid password: WrongPassword123
 
-TEST CASES
-----------
-{json.dumps(test_cases, indent=2)}
+Invalid login message: Invalid username or password
+Successful login message: Login successful
+Dashboard title: Dashboard
+Dashboard message: Welcome to the QA Demo Application
 
-OUTPUT REQUIREMENTS
--------------------
-Return one valid JSON object with exactly these keys:
+API endpoint: http://127.0.0.1:8001/api/login
+API method: POST
+Valid API payload:
+{{"username": "testuser", "password": "Password123"}}
+
+Expected successful API response:
+success=true, message="Login successful", username="testuser"
+
+GENERATION RULES
+----------------
+1. Jira description and extracted test cases determine which tests
+   must be generated. Do not omit a case merely because its title
+   mentions logout or another authentication operation.
+
+2. Generate Selenium pytest tests for UI cases and Karate feature
+   scenarios for API cases.
+
+3. Preserve Jira test case IDs and cover each case with an appropriate
+   automated test.
+
+4. Generate executable code, not pseudocode, placeholders, or TODOs.
+
+5. Use the application configuration above where it applies.
+   Do not invent URLs, API endpoints, credentials, element IDs,
+   success messages, or backend behavior.
+
+6. For UI tests, use Selenium explicit waits and meaningful assertions.
+   Verify both expected success and expected failure behavior.
+
+7. For logout tests:
+   - First log in with valid credentials if required.
+   - Use the logout control described by Jira and locate it using
+     an appropriate accessible name or visible text when possible.
+   - Click the control and wait for the expected redirect.
+   - Verify the logged-out state and that protected content is no
+     longer accessible, where specified by the application.
+   - Never call pytest.skip merely because the case is about logout.
+   - Do not assume logout works if the application does not implement it.
+   - If a required selector, route, or behavior is not specified and
+     cannot be established from the supplied configuration, report it
+     in missing_details rather than inventing implementation details.
+
+8. For invalid login, verify the specified error message and ensure
+   the dashboard is not displayed.
+
+9. Use a pytest fixture that always closes the browser in teardown.
+   Do not pause for keyboard input.
+
+10. Support both local Windows execution and GitHub Actions:
+    - Do not force headless mode.
+    - Use a 1920x1080 browser window.
+    - If CHROME_BIN is set, use it as the Chrome binary.
+    - If CHROMEDRIVER_PATH is set, use it as the ChromeDriver service.
+    - If these environment variables are absent, allow Selenium to
+      use its normal local browser/driver discovery.
+
+11. Generate API tests only for API cases identified in Jira.
+    Use the supplied API configuration where applicable.
+    Do not invent additional endpoints or response fields.
+
+12. Do not silently omit test cases. If a case cannot be automated
+    with the supplied information, document the exact missing
+    information in missing_details.
+
+OUTPUT FORMAT
+-------------
+Return exactly one valid JSON object with these keys:
 - ui_pytest: string containing executable Python pytest source
-- api_karate: string containing a Karate feature
+- api_karate: string containing a Karate feature file
 - missing_details: array of strings
 
-
-For local Windows execution:
-- Do not use headless mode.
-- Create a webdriver.ChromeOptions() object.
-- Add options.add_argument("--window-size=1920,1080").
-- Create the driver using webdriver.Chrome(options=options).
-- Do not call driver.maximize_window().
-- Do not use input() to pause the browser.
-- Always call driver.quit() during fixture teardown.
-- Keep the generated test fixture compatible with GitHub Actions.
-
-
-Requirements:
-1. Use the exact application URLs, element IDs, credentials and messages
-   specified above. Never replace them with TODO placeholders.
-2. Use Selenium explicit waits.
-3. For valid login, verify the success message and dashboard elements.
-4. For invalid login, verify the exact error message and that the
-   dashboard is not displayed.
-5. For logout, use pytest.skip because logout is not implemented.
-6. Use the API endpoint and JSON payload specified above.
-7. In Karate, verify status 200 and the success, message and username
-   response fields.
-8. Do not enable headless mode. Chrome must open visibly when tests are
-   run locally on Windows. CI may provide a virtual display if needed.
-9. Do not invent endpoints, selectors, or application behavior.
-10. Return an empty missing_details array for details supplied above.
-11. Return no Markdown fences or explanatory prose.
+Return no Markdown fences or explanatory text outside the JSON.
 """
 
     system_prompt = """
-You are an experienced test automation engineer.
+You are a senior test automation engineer.
 
-For invalid-login tests, verify the dashboard is not visible using
-Selenium's is_displayed(). Do not use presence_of_element_located()
-with pytest.raises(TimeoutException) to assert that the dashboard
-is absent or hidden.
-For invalid-login UI tests, verify that the dashboard is not visible
-using Selenium's is_displayed(). Do not use
-pytest.raises(TimeoutException) with presence_of_element_located()
-to verify that the dashboard is hidden.
-Return exactly one valid JSON object.
-The object must contain ui_pytest, api_karate, and missing_details.
+Treat the Jira description and extracted test cases as the source
+of truth for the requested test coverage.
 
-The source code fields must be JSON strings with correctly escaped
-quotes, backslashes, and newlines.
+Generate complete, syntactically valid automation scripts.
+Do not automatically skip a requested test case.
+Do not fabricate application functionality, selectors, endpoints,
+credentials, or expected results.
 
-Python requirements:
-- Generate syntactically valid Python.
-- Use Selenium and pytest for UI cases.
-- Use underscores in function and variable names.
-- Use normal Python attribute and method access.
-- Include assertions for the expected behavior where possible.
-- Do not invent application details.
-- Do not truncate functions or statements.
-Use the APPLICATION CONFIGURATION in the user prompt as the
-source of truth. Never replace supplied values with TODO placeholders.
-Do not report supplied configuration values as missing.
-Generate tests only for behavior supported by the supplied configuration.
+Python:
+- Use pytest and Selenium for UI tests.
+- Include the imports and fixtures required by the generated tests.
+- Use Selenium explicit waits.
+- Use normal Python syntax and meaningful assertions.
+- Use unique, descriptive test function names.
+- Ensure browser teardown happens even when a test fails.
+- Use environment-configured Chrome and ChromeDriver when available.
+- Never use input() to pause a test.
+- Do not use headless mode unless the supplied requirements explicitly
+  request it.
+- Do not assert that an element is absent by expecting a timeout
+  from presence_of_element_located. Use appropriate visibility checks.
 
-Karate requirements:
+Karate:
 - Generate valid Karate feature syntax.
-- Do not invent API contract details.
+- Use only API details supplied in the configuration or Jira.
+- Verify the status and response fields specified by the test case.
 
-For local Windows execution:
-- Do not use headless mode.
-- Use webdriver.Chrome() and maximize the browser window.
-- In the pytest fixture teardown, wait for the user to press Enter
-  before calling driver.quit().
-- Use input("Press Enter to close Chrome...") for this pause.
+Missing information:
+- Return missing_details for required application details that cannot
+  be established from the supplied information.
+- Do not list configuration values already provided as missing.
+- Do not claim a requested behavior is implemented without evidence.
 
-Keep the response concise. Do not repeat the test-case list.
-Do not return Markdown fences or text outside the JSON object.
+Return exactly one JSON object containing ui_pytest, api_karate,
+and missing_details. Source code values must be JSON strings.
 """
 
     result = parse_json_response(
@@ -346,6 +402,14 @@ Do not return Markdown fences or text outside the JSON object.
     result["api_karate"] = normalize_generated_code(
         result["api_karate"]
     )
+
+    if result["ui_pytest"]:
+        ast.parse(result["ui_pytest"])
+
+    if result["api_karate"] and "Feature:" not in result["api_karate"]:
+        raise ValueError(
+            "Generated Karate script is missing its Feature declaration."
+        )
 
     return result
 

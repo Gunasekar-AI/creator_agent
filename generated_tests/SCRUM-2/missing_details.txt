@@ -1,1 +1,2 @@
-
+Logout button selector (ID or unique locator) is not provided; test uses button text locator which may need adjustment
+Protected page URL or identifier after login is not specified; logout test verifies absence of dashboard element but cannot navigate to a known protected route
