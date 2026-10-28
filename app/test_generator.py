@@ -1,4 +1,3 @@
-from pathlib import Path
 
 import ast
 import json
@@ -10,6 +9,7 @@ from dotenv import load_dotenv
 from groq import BadRequestError, Groq
 
 from app.git_publisher import publish_generated_tests
+
 
 load_dotenv()
 
@@ -24,21 +24,28 @@ def get_groq_client():
     return Groq(api_key=api_key)
 
 
+
 def jira_description_to_text(value):
     """Convert Jira plain text or Atlassian rich text to text."""
     if value is None:
         return ""
+
     if isinstance(value, str):
         return value
+
     if isinstance(value, list):
         parts = [jira_description_to_text(item) for item in value]
-        return "\\n".join(part for part in parts if part)
+        return "\n".join(part for part in parts if part)
+
     if isinstance(value, dict):
         if value.get("type") == "text":
             return value.get("text", "")
+
         if value.get("content") is not None:
             return jira_description_to_text(value["content"])
+
         return value.get("text", "")
+
     return str(value)
 
 
@@ -81,17 +88,20 @@ def call_groq(system_prompt, user_prompt):
     return content
 
 
+
 def parse_json_response(response_text):
     """Parse a JSON object returned by Groq."""
     cleaned = (response_text or "").strip()
+
     cleaned = re.sub(
-        r"\\A\\s*```(?:json)?[ \\t]*\\r?\\n?",
+        r"\A\s*```(?:json)?[ \t]*\r?\n?",
         "",
         cleaned,
         count=1,
         flags=re.IGNORECASE,
     )
-    cleaned = re.sub(r"\\r?\\n?```[ \\t]*\\Z", "", cleaned)
+    cleaned = re.sub(r"\r?\n?```[ \t]*\Z", "", cleaned)
+
     try:
         result = json.loads(cleaned)
     except json.JSONDecodeError as exc:
@@ -99,9 +109,32 @@ def parse_json_response(response_text):
             f"Groq returned invalid JSON: {exc}. "
             f"Response begins with: {cleaned[:500]!r}"
         ) from exc
+
     if not isinstance(result, dict):
         raise ValueError("Groq response must be a JSON object.")
+
     return result
+
+
+def normalize_generated_code(code):
+    """Remove optional Markdown fences from generated source."""
+    if not isinstance(code, str):
+        return ""
+
+    code = code.strip()
+    if not code:
+        return ""
+
+    code = re.sub(
+        r"\A```(?:python|gherkin|karate|feature)?[ \t]*\r?\n?",
+        "",
+        code,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    code = re.sub(r"\r?\n?```[ \t]*\Z", "", code)
+
+    return code.strip()
 
 
 def normalize_generated_code(code):
@@ -302,20 +335,29 @@ JSON:
             f"line={exc.lineno}, source={exc.text!r}"
         ) from exc
 
+    
     function_nodes = {
         node.name: node
         for node in ast.walk(tree)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     }
+
     required_patterns = {
-        "TC-001": re.compile(r"^test_tc_001_\\w+$"),
-        "TC-002": re.compile(r"^test_tc_002_\\w+$"),
-        "TC-003": re.compile(r"^test_tc_003_\\w+$"),
+        "TC-001": re.compile(r"^test_tc_001_\w+$"),
+        "TC-002": re.compile(r"^test_tc_002_\w+$"),
+        "TC-003": re.compile(r"^test_tc_003_\w+$"),
     }
+
     for test_id, pattern in required_patterns.items():
-        if not any(pattern.match(name) for name in function_nodes):
+        matches = [
+            name for name in function_nodes
+            if pattern.match(name)
+        ]
+
+        if not matches:
             test_names = sorted(
-                name for name in function_nodes if name.startswith("test_")
+                name for name in function_nodes
+                if name.startswith("test_")
             )
             raise ValueError(
                 f"Generated UI script is missing a test function for "
@@ -326,29 +368,45 @@ JSON:
         name for name in function_nodes
         if required_patterns["TC-003"].match(name)
     )
+
     logout_node = function_nodes[logout_name]
     lines = ui_script.splitlines()
-    end_line = getattr(logout_node, "end_lineno", logout_node.lineno)
-    logout_body = "\\n".join(lines[logout_node.lineno - 1:end_line])
+    end_line = getattr(
+        logout_node, "end_lineno", logout_node.lineno
+    )
+    logout_body = "\n".join(
+        lines[logout_node.lineno - 1:end_line]
+    )
 
     if "logout-button" not in logout_body:
         raise ValueError(
             f"{logout_name} does not use the configured logout-button ID."
         )
-    if not re.search(r"\\.click\\s*\\(", logout_body):
-        raise ValueError(f"{logout_name} does not click the logout button.")
-    if re.search(r"pytest\\.(?:fail|skip|mark\\.xfail)\\s*\\(", logout_body):
+
+    if not re.search(r"\.click\s*\(", logout_body):
+        raise ValueError(
+            f"{logout_name} does not click the logout button."
+        )
+
+    if re.search(
+        r"pytest\.(?:fail|skip|mark\.xfail)\s*\(",
+        logout_body,
+    ):
         raise ValueError(
             f"{logout_name} contains a placeholder failure, skip, or xfail."
         )
 
     if api_script and not re.search(
-        r"^\\s*Feature\\s*:", api_script, flags=re.MULTILINE
+        r"^\s*Feature\s*:",
+        api_script,
+        flags=re.MULTILINE,
     ):
         raise ValueError(
             "Generated Karate script is missing its Feature declaration."
         )
+
     return result
+
 
 
 def _write_text(path, content):
@@ -381,16 +439,21 @@ def generate_scripts(ticket):
         output_dir / "test_cases.json",
         json.dumps(extracted, indent=2, ensure_ascii=False),
     )
+    
     if ui_script:
-        _write_text(output_dir / "test_ui.py", ui_script + "\\n")
+        _write_text(output_dir / "test_ui.py", ui_script + "\n")
+
     if api_script:
-        _write_text(output_dir / "test_api.feature", api_script + "\\n")
+        _write_text(output_dir / "test_api.feature", api_script + "\n")
 
     missing = generated["missing_details"]
+
     _write_text(
         output_dir / "missing_details.txt",
-        "\\n".join(str(item) for item in missing) + ("\\n" if missing else ""),
+        "\n".join(str(item) for item in missing)
+        + ("\n" if missing else ""),
     )
+
     print("Generated test files in:", output_dir.resolve())
     if missing:
         print("Some details need to be configured:")
