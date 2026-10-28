@@ -1,10 +1,8 @@
 Feature: Login API with valid credentials
 
-Background:
-    * url 'http://127.0.0.1:8001/api/login'
-
 Scenario: TC-004 Login API with valid credentials
-    Given request { username: 'testuser', password: 'Password123' }
+    Given url 'http://127.0.0.1:8001/api/login'
+    And request { username: 'testuser', password: 'Password123' }
     When method post
     Then status 200
     And match response.success == true

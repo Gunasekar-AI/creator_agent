@@ -43,7 +43,7 @@
         "Click the Logout button.",
         "Wait for the logout process to complete."
       ],
-      "expected_result": "The user is logged out successfully. The user is redirected to the login page. The authenticated session is cleared. The user cannot access protected pages without logging in again.",
+      "expected_result": "The user is logged out successfully.\nThe user is redirected to the login page.\nThe authenticated session is cleared.\nThe user cannot access protected pages without logging in again.",
       "missing_details": []
     },
     {
