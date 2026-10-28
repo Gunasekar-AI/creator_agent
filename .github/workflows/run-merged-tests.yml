@@ -1,3 +1,4 @@
+
 name: Run AI Generated Tests After Merge
 
 on:
@@ -25,21 +26,27 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest selenium fastapi uvicorn pydantic
-
-      # No setup-chrome step needed — Selenium Manager will resolve
-      # a matching chromedriver for the pre-installed Chrome.
+          pip install pytest selenium fastapi uvicorn pydantic python-multipart
 
       - name: Verify installed browser
         shell: bash
         run: |
-          /opt/google/chrome/chrome --version || google-chrome --version || true
+          set -e
+          if command -v google-chrome >/dev/null 2>&1; then
+            google-chrome --version
+          elif [ -x /opt/google/chrome/chrome ]; then
+            /opt/google/chrome/chrome --version
+          else
+            echo "Chrome is not installed on the runner."
+            exit 1
+          fi
 
       - name: Start demo backend
         working-directory: demo-app/backend
         run: |
           nohup python -m uvicorn main:app \
-            --host 127.0.0.1 --port 8001 \
+            --host 127.0.0.1 \
+            --port 8001 \
             > "$RUNNER_TEMP/fastapi.log" 2>&1 &
 
       - name: Wait for demo backend
@@ -47,29 +54,21 @@ jobs:
         run: |
           for i in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8001/ > /dev/null; then
-              echo "Demo application is ready"; exit 0
+              echo "Demo application is ready"
+              exit 0
             fi
             sleep 2
           done
-          echo "Demo backend failed to start. Backend logs:"
-          cat "$RUNNER_TEMP/fastapi.log"; exit 1
-      
-      - name: Verify Chrome and ChromeDriver
-        shell: bash
-        run: |
-          echo "Chrome binary:"
-          "$CHROME_BIN" --version
 
-          echo "ChromeDriver binary:"
-          "$CHROMEDRIVER_PATH" --version
+          echo "Demo backend failed to start. Backend logs:"
+          cat "$RUNNER_TEMP/fastapi.log"
+          exit 1
 
       - name: Run generated UI tests
+        env:
+          SE_NODE_SESSION_TIMEOUT: "60"
         run: |
           xvfb-run -a python -m pytest -v --tb=short generated_tests
-
-
-      - name: Run generated UI tests
-        run: xvfb-run -a python -m pytest -v --tb=short generated_tests
 
       - name: Upload backend logs on failure
         if: failure()
