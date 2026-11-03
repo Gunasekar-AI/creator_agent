@@ -1,0 +1,1 @@
+Names of the environment variables that store the credentials

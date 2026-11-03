@@ -1,24 +1,29 @@
 {
   "test_cases": [
     {
-      "test_id": "TC-001",
+      "test_id": null,
       "test_type": "ui",
-      "title": "Successful Login with valid credentials",
+      "title": "Successful Login",
       "preconditions": [
-        "The application is running and accessible",
-        "The login page is available",
-        "Valid test credentials are configured through environment variables",
-        "The Selenium WebDriver and required browser dependencies are configured",
-        "The user account is active and authorized to access the dashboard"
+        "The login page is open",
+        "Valid test credentials are available through environment variables",
+        "The application is running and accessible"
       ],
       "steps": [
-        "Navigate to the application login page",
-        "Verify the login form is displayed",
-        "Enter valid username and password retrieved from environment variables",
-        "Click the Login button"
+        "Given the login page is open",
+        "When the user enters valid credentials and clicks the login button",
+        "Then the dashboard should appear"
       ],
-      "expected_result": "User is authenticated successfully, redirected to the dashboard, dashboard title matches the expected value, welcome message is displayed with the expected text, and the login form is no longer visible",
-      "missing_details": []
+      "expected_result": "Dashboard is displayed, the dashboard title is correct, the welcome message is displayed with the expected text, and the login form is no longer displayed",
+      "missing_details": [
+        "URL of the login page",
+        "Selectors or identifiers for username field",
+        "Selectors or identifiers for password field",
+        "Selector or identifier for the login button",
+        "Selector or identifier for the dashboard title element",
+        "Selector or identifier for the welcome message element",
+        "Names of the environment variables that store the credentials"
+      ]
     }
   ]
 }
