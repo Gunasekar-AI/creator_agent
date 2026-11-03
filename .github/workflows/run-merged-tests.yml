@@ -1,48 +1,97 @@
-
-name: Run AI Generated Tests After Merge
+name: Run AI Generated Tests
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "generated_tests/**"
+      - "demo-app/**"
+      - "app/**"
+      - ".github/workflows/run-merged-tests.yml"
+
   push:
     branches:
       - main
+
   workflow_dispatch:
+    inputs:
+      issue_key:
+        description: "Jira issue key, for example SCRUM-16"
+        required: true
+        type: string
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
-  run-merged-tests:
+  run-generated-tests:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout main
+      - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine Jira issue key
+        id: ticket
+        shell: bash
+        env:
+          INPUT_ISSUE_KEY: ${{ inputs.issue_key }}
+          PR_BRANCH: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+
+          if [ -n "$INPUT_ISSUE_KEY" ]; then
+            ISSUE_KEY="$INPUT_ISSUE_KEY"
+          elif [ -n "$PR_BRANCH" ]; then
+            ISSUE_KEY=$(echo "$PR_BRANCH" | grep -oiE '[A-Z][A-Z0-9]+-[0-9]+' | head -n 1 || true)
+          else
+            echo "For a main branch run, provide a Jira issue key through workflow_dispatch."
+            exit 1
+          fi
+
+          if [ -z "$ISSUE_KEY" ]; then
+            echo "Could not determine Jira issue key from the branch name."
+            echo "Use a branch such as scrum-16-login or run manually with issue_key."
+            exit 1
+          fi
+
+          echo "issue_key=$ISSUE_KEY" >> "$GITHUB_OUTPUT"
+          echo "Running tests for $ISSUE_KEY"
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest selenium fastapi uvicorn pydantic python-multipart
-
-      - name: Verify installed browser
-        shell: bash
-        run: |
-          set -e
-          if command -v google-chrome >/dev/null 2>&1; then
-            google-chrome --version
-          elif [ -x /opt/google/chrome/chrome ]; then
-            /opt/google/chrome/chrome --version
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
           else
-            echo "Chrome is not installed on the runner."
-            exit 1
+            pip install pytest selenium fastapi uvicorn pydantic python-multipart python-dotenv
           fi
+
+      - name: Verify Chrome and Maven
+        run: |
+          google-chrome --version
+          mvn --version
 
       - name: Start demo backend
         working-directory: demo-app/backend
+        env:
+          BASE_URL: http://127.0.0.1:8001
         run: |
           nohup python -m uvicorn main:app \
             --host 127.0.0.1 \
@@ -54,184 +103,80 @@ jobs:
         run: |
           for i in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8001/ > /dev/null; then
-              echo "Demo application is ready"
+              echo "Demo application is ready."
               exit 0
             fi
             sleep 2
           done
 
-          echo "Demo backend failed to start. Backend logs:"
+          echo "Demo backend failed to start."
           cat "$RUNNER_TEMP/fastapi.log"
           exit 1
 
-      - name: Run generated UI tests
+      - name: Run Jira ticket tests
+        id: tests
         env:
+          BASE_URL: http://127.0.0.1:8001
+          TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
+          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
           SE_NODE_SESSION_TIMEOUT: "60"
+        shell: bash
         run: |
-          xvfb-run -a python -m pytest -v --tb=short generated_tests
+          set -uo pipefail
 
-      - name: Upload backend logs on failure
-        if: failure()
+          ISSUE_KEY="${{ steps.ticket.outputs.issue_key }}"
+          ISSUE_DIR="generated_tests/$ISSUE_KEY"
+
+          UI_FILE="$ISSUE_DIR/test_ui.py"
+          API_FILE="$ISSUE_DIR/test_api.feature"
+
+          if [ -f "$UI_FILE" ] && [ -f "$API_FILE" ]; then
+            xvfb-run -a python -m app.local_test_runner "$ISSUE_KEY"
+          elif [ -f "$UI_FILE" ]; then
+            xvfb-run -a python -m app.local_test_runner "$ISSUE_KEY" --ui-only
+          elif [ -f "$API_FILE" ]; then
+            python -m app.local_test_runner "$ISSUE_KEY" --api-only
+          else
+            echo "No generated UI or API tests found for $ISSUE_KEY."
+            exit 1
+          fi
+
+      - name: Upload complete test evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: demo-backend-log
-          path: ${{ runner.temp }}/fastapi.log
-          if-no-files-found: ignore
+          name: test-evidence-${{ steps.ticket.outputs.issue_key }}-${{ github.run_id }}
+          path: |
+            test-results/${{ steps.ticket.outputs.issue_key }}/
+            ${{ runner.temp }}/fastapi.log
+          if-no-files-found: warn
+          retention-days: 30
 
+      - name: Comment test result on pull request
+        if: always() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ISSUE_KEY: ${{ steps.ticket.outputs.issue_key }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          JOB_STATUS: ${{ job.status }}
+        shell: bash
+        run: |
+          BODY=$(cat <<EOF
+          ## AI Generated Test Execution
 
+          **Jira:** ${ISSUE_KEY}
+          **Workflow status:** ${JOB_STATUS}
 
+          [View test logs and downloadable evidence](${RUN_URL})
 
-# name: Run AI Generated Tests After Merge
+          The workflow artifact contains the test summary, UI/API logs,
+          JUnit report, Karate report (when generated), and backend log.
 
-# on:
-#   push:
-#     branches: [main]
-#   workflow_dispatch:
+          EOF
+          )
 
-# permissions:
-#   contents: read
-#   pull-requests: read
-
-# jobs:
-#   run-merged-tests:
-#       if: github.event_name == 'workflow_dispatch' || github.event_name == 'push'
-
-#     runs-on: ubuntu-latest
-
-#     steps:
-#       - name: Checkout merged main
-#         uses: actions/checkout@v4
-#         with:
-#           ref: main
-#           fetch-depth: 0
-
-#       - name: Set up Python
-#         uses: actions/setup-python@v5
-#         with:
-#           python-version: "3.12"
-
-#       - name: Install dependencies
-#         run: |
-#           python -m pip install --upgrade pip
-#           pip install pytest selenium fastapi uvicorn pydantic
-
-#       - name: Set up Chrome
-#         uses: browser-actions/setup-chrome@v1
-
-#       - name: Start demo backend
-#         working-directory: demo-app/backend
-#         run: |
-#           nohup python -m uvicorn main:app \
-#             --host 127.0.0.1 \
-#             --port 8001 \
-#             > "$RUNNER_TEMP/fastapi.log" 2>&1 &
-
-#       - name: Wait for demo backend
-#         run: |
-#           for i in $(seq 1 30); do
-#             if curl --fail --silent http://127.0.0.1:8001/ > /dev/null; then
-#               echo "Demo application is ready"
-#               exit 0
-#             fi
-#             sleep 2
-#           done
-
-#           cat "$RUNNER_TEMP/fastapi.log"
-#           exit 1
-
-#       - name: Run generated UI tests
-#         env:
-#           BASE_URL: http://127.0.0.1:8001
-#         run: |
-#           xvfb-run -a python -m pytest -v --tb=short generated_tests
-
-#       - name: Upload backend logs on failure
-#         if: failure()
-#         uses: actions/upload-artifact@v4
-#         with:
-#           name: demo-backend-log
-#           path: ${{ runner.temp }}/fastapi.log
-#           if-no-files-found: ignore
-
-
-
-# name: Run AI Generated Tests After Merge
-
-# on:
-#   pull_request:
-#     types: [closed]
-#     branches:
-#       - main
-
-#   workflow_dispatch:
-
-# permissions:
-#   contents: read
-#   pull-requests: read
-
-# jobs:
-#   run-merged-tests:
-#     # For automatic runs, only continue when the PR was merged.
-#     # workflow_dispatch also allows manual testing.
-#     if: >
-#       github.event_name == 'workflow_dispatch' ||
-#       github.event.pull_request.merged == true
-
-#     runs-on: ubuntu-latest
-
-#     env:
-#       GH_TOKEN: ${{ github.token }}
-#       BASE_URL: http://127.0.0.1:8000
-
-#     steps:
-#       - name: Checkout repository
-#         uses: actions/checkout@v4
-#         with:
-#           ref: main
-#           fetch-depth: 0
-
-#       - name: Set up Python
-#         uses: actions/setup-python@v5
-#         with:
-#           python-version: "3.12"
-
-#       - name: Install Python dependencies
-#         run: |
-#           python -m pip install --upgrade pip
-#           pip install pytest selenium fastapi uvicorn pydantic
-
-#       - name: Set up Chrome
-#         uses: browser-actions/setup-chrome@v1
-
-#       - name: Start FastAPI demo application
-#         working-directory: backend
-#         run: |
-#           nohup python -m uvicorn main:app \
-#             --host 127.0.0.1 \
-#             --port 8000 \
-#             > "$RUNNER_TEMP/fastapi.log" 2>&1 &
-
-#       - name: Wait for application
-#         run: |
-#           for i in $(seq 1 30); do
-#             if curl --fail --silent http://127.0.0.1:8000/ > /dev/null; then
-#               echo "Application is ready"
-#               exit 0
-#             fi
-#             sleep 2
-#           done
-
-#           echo "Application failed to start"
-#           cat "$RUNNER_TEMP/fastapi.log"
-#           exit 1
-
-#       - name: Run merged test runner
-#         run: python -m app.run_merged_tests --branch main
-
-#       - name: Upload application logs on failure
-#         if: failure()
-#         uses: actions/upload-artifact@v4
-#         with:
-#           name: fastapi-server-log
-#           path: ${{ runner.temp }}/fastapi.log
-#           if-no-files-found: ignore
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            -f body="$BODY"
