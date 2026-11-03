@@ -1,28 +1,28 @@
 {
   "test_cases": [
     {
-      "test_id": null,
+      "test_id": "TC-001",
       "test_type": "ui",
-      "title": "Successful Login",
+      "title": "Successful Login with valid credentials",
       "preconditions": [
-        "The login page is open",
-        "Valid test credentials are available through environment variables",
-        "The application is running and accessible"
+        "The login page is open and accessible.",
+        "Valid test credentials are configured through environment variables.",
+        "The application is running and accessible.",
+        "The required Selenium browser environment is configured."
       ],
       "steps": [
-        "Given the login page is open",
+        "Given the user is on the login page",
         "When the user enters valid credentials and clicks the login button",
-        "Then the dashboard should appear"
+        "Then the application should authenticate the user and display the dashboard"
       ],
-      "expected_result": "Dashboard is displayed, the dashboard title is correct, the welcome message is displayed with the expected text, and the login form is no longer displayed",
+      "expected_result": "User is authenticated, the dashboard is displayed with title \"Dashboard\" and welcome message \"Welcome to the QA Demo Application\", and the login form is no longer visible",
       "missing_details": [
-        "URL of the login page",
-        "Selectors or identifiers for username field",
-        "Selectors or identifiers for password field",
-        "Selector or identifier for the login button",
-        "Selector or identifier for the dashboard title element",
-        "Selector or identifier for the welcome message element",
-        "Names of the environment variables that store the credentials"
+        "Login page URL",
+        "Selectors for username field",
+        "Selectors for password field",
+        "Selector for login button",
+        "Selector for dashboard title",
+        "Selector for welcome message"
       ]
     }
   ]
