@@ -4,6 +4,10 @@ import re
 import shutil
 import subprocess
 import tempfile
+import os
+import tempfile
+from pathlib import Path
+
 from pathlib import Path
 
 
@@ -69,6 +73,222 @@ def ensure_github_cli(repo):
 
     run_command(["gh", "auth", "status"], cwd=repo)
 
+def prepare_generated_tests(
+    issue_key,
+    labels,
+    output_dir,
+    repo_dir=None,
+    base_branch="main",
+):
+    """
+    Prepare and commit generated tests on a Jira-specific branch.
+
+    Does not push or create a PR. The returned commit is the commit
+    that must pass all requested tests before publication.
+    """
+    repo = Path(repo_dir or Path.cwd()).resolve()
+    output = Path(output_dir).resolve()
+
+    if not (repo / ".git").exists():
+        raise RuntimeError(f"Not a Git repository: {repo}")
+
+    if not output.is_dir() or not any(output.iterdir()):
+        raise RuntimeError(f"No generated files found in {output}")
+
+    try:
+        relative_output = output.relative_to(repo).as_posix()
+    except ValueError as exc:
+        raise RuntimeError(
+            "Generated output directory must be inside the repository."
+        ) from exc
+
+    if relative_output in ("", "."):
+        raise RuntimeError("Refusing to prepare the repository root.")
+
+    branch = make_branch_name(issue_key, labels)
+
+    with tempfile.TemporaryDirectory(prefix="jira-generated-") as temp_dir:
+        snapshot = Path(temp_dir) / "generated_output"
+        shutil.copytree(output, snapshot)
+
+        # Refuse to disturb changes outside this ticket's generated folder.
+        changed_paths = get_changed_paths(repo)
+        unrelated = [
+            path for path in changed_paths
+            if not path_is_inside(path, relative_output)
+        ]
+
+        if unrelated:
+            raise RuntimeError(
+                "There are unrelated Git changes. Commit or safely stash "
+                "them before preparing generated tests.\n"
+                + "\n".join(f"  - {path}" for path in unrelated)
+            )
+
+        run_git("fetch", "origin", base_branch, cwd=repo)
+
+        current_branch = run_git(
+            "branch", "--show-current", cwd=repo
+        )
+        local_branch = run_git(
+            "branch", "--list", branch, cwd=repo
+        )
+        remote_branch = run_git(
+            "ls-remote", "--heads", "origin",
+            f"refs/heads/{branch}", cwd=repo
+        )
+
+        # Restore only the generated folder, then remove its untracked files.
+        run_git(
+            "restore",
+            "--source=HEAD",
+            "--staged",
+            "--worktree",
+            "--",
+            relative_output,
+            cwd=repo,
+        )
+        run_git("clean", "-fd", "--", relative_output, cwd=repo)
+
+        # Select or create the Jira branch.
+        if current_branch == branch:
+            pass
+        elif local_branch:
+            run_git("switch", branch, cwd=repo)
+        elif remote_branch:
+            run_git(
+                "switch", "--track", "-c", branch,
+                f"origin/{branch}", cwd=repo
+            )
+        else:
+            run_git(
+                "switch", "-c", branch,
+                f"origin/{base_branch}", cwd=repo
+            )
+
+        # Rebase an existing remote Jira branch before adding new tests.
+        remote_branch = run_git(
+            "ls-remote", "--heads", "origin",
+            f"refs/heads/{branch}", cwd=repo
+        )
+        if remote_branch:
+            run_git("pull", "--rebase", "origin", branch, cwd=repo)
+
+        # Apply the saved generated files to the Jira branch.
+        if output.exists():
+            shutil.rmtree(output)
+        shutil.copytree(snapshot, output)
+
+        run_git("add", "--", relative_output, cwd=repo)
+
+        staged = run_git(
+            "diff", "--cached", "--name-only", cwd=repo
+        )
+
+        if staged:
+            run_git(
+                "commit",
+                "-m",
+                f"test: generate automation for {issue_key}",
+                cwd=repo,
+            )
+        else:
+            raise RuntimeError(
+                "No generated-file changes to commit. "
+                "The Jira branch already contains these files."
+            )
+
+        commit = run_git("rev-parse", "HEAD", cwd=repo)
+
+        remaining = get_changed_paths(repo)
+        if remaining:
+            raise RuntimeError(
+                "Working tree is not clean after preparing tests:\n"
+                + "\n".join(f"  - {path}" for path in remaining)
+            )
+
+        return {
+            "branch": branch,
+            "base_branch": base_branch,
+            "commit": commit,
+            "files": staged.splitlines(),
+        }
+
+
+def publish_tested_branch(
+    prepared,
+    test_summary,
+    issue_key,
+    summary="",
+    repo_dir=None,
+):
+    """
+    Push the exact tested commit and create or reuse its pull request.
+    Refuses publication unless all requested suites passed.
+    """
+    repo = Path(repo_dir or Path.cwd()).resolve()
+
+    if test_summary.get("overall_status") != "PASS":
+        raise RuntimeError("Tests did not pass. Refusing to publish.")
+
+    suites = test_summary.get("suites", [])
+    if not suites or any(
+        suite.get("status") != "PASS" for suite in suites
+    ):
+        raise RuntimeError(
+            "At least one requested test suite did not pass."
+        )
+
+    tested_commit = test_summary.get("git_commit")
+    if not tested_commit or tested_commit != prepared.get("commit"):
+        raise RuntimeError(
+            "Tested commit does not match the prepared commit."
+        )
+
+    current_branch = run_git(
+        "branch", "--show-current", cwd=repo
+    )
+    current_commit = run_git("rev-parse", "HEAD", cwd=repo)
+
+    if current_branch != prepared["branch"]:
+        raise RuntimeError(
+            f"Expected branch {prepared['branch']}, "
+            f"but current branch is {current_branch}."
+        )
+
+    if current_commit != prepared["commit"]:
+        raise RuntimeError(
+            "HEAD changed after testing. Refusing to publish."
+        )
+
+    remaining = get_changed_paths(repo)
+    if remaining:
+        raise RuntimeError(
+            "Working tree is not clean. Refusing to publish:\n"
+            + "\n".join(f"  - {path}" for path in remaining)
+        )
+
+    ensure_github_cli(repo)
+
+    run_git(
+        "push", "-u", "origin", prepared["branch"], cwd=repo
+    )
+
+    pr_url = create_or_reuse_pr(
+        repo=repo,
+        branch=prepared["branch"],
+        base_branch=prepared["base_branch"],
+        issue_key=issue_key,
+        summary=summary,
+    )
+
+    return {
+        "branch": prepared["branch"],
+        "base_branch": prepared["base_branch"],
+        "commit": prepared["commit"],
+        "pr_url": pr_url,
+        "test_summary": test_summary,
+    }
 
 def create_or_reuse_pr(repo, branch, base_branch, issue_key, summary):
     """Reuse an open PR for this branch, or create one."""

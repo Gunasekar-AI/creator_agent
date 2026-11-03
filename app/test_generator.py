@@ -8,9 +8,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from groq import BadRequestError, Groq
 
-from app.git_publisher import publish_generated_tests
-
-
 load_dotenv()
 
 MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
@@ -198,6 +195,7 @@ Return one valid JSON object only, with this structure:
 def generate_automation_scripts(ticket, test_cases):
     """Generate and validate Selenium pytest and Karate source code."""
     description = jira_description_to_text(ticket.get("description"))
+
     prompt = f"""
 JIRA ISSUE
 ----------
@@ -225,10 +223,12 @@ Dashboard section ID: dashboard-section
 Dashboard title element ID: dashboard-title
 Dashboard message element ID: dashboard-message
 
-Valid username: testuser
-Valid password: Password123
-Invalid username: invalid_user
-Invalid password: WrongPassword123
+Credentials:
+- Valid username must be read from environment variable TEST_USERNAME.
+- Valid password must be read from environment variable TEST_PASSWORD.
+- Never hardcode valid credentials in generated test files.
+- Invalid username: invalid_user
+- Invalid password: WrongPassword123
 
 Invalid login message: Invalid username or password
 Successful login message: Login successful
@@ -237,13 +237,16 @@ Dashboard message: Welcome to the QA Demo Application
 
 API endpoint: http://127.0.0.1:8001/api/login
 API method: POST
-Valid API payload:
-{{"username": "testuser", "password": "Password123"}}
+
+API credentials:
+- Read username from karate.properties['test.username'].
+- Read password from karate.properties['test.password'].
+- Never hardcode valid API credentials.
 
 Expected successful API response:
 success=true
 message="Login successful"
-username="testuser"
+username must equal the configured test username.
 
 MANDATORY PYTHON TEST FUNCTION NAMES
 ------------------------------------
@@ -261,29 +264,38 @@ GENERATION RULES
 4. Use only the configuration above for selectors, URLs, credentials,
    messages, and application behavior.
 5. Use Selenium explicit waits and meaningful assertions.
-6. TC-001: open the UI, enter valid credentials, click login-button, wait
-   for dashboard-title to be visible, assert title Dashboard and message
-   Welcome to the QA Demo Application. Do not wait for login-status to
-   remain visible after successful login.
-7. TC-002: open the UI, enter invalid credentials, click login-button, wait
-   for login-status to be visible, assert its error text, and assert
+6. TC-001: read TEST_USERNAME and TEST_PASSWORD using os.getenv().
+   Fail clearly if either is missing. Open the UI, enter the credentials,
+   click login-button, wait for dashboard-title to be visible, and assert
+   the title Dashboard and message Welcome to the QA Demo Application.
+   Do not wait for login-status to remain visible after successful login.
+7. TC-002: open the UI, enter invalid credentials, click login-button,
+   wait for login-status to be visible, assert its error text, and assert
    dashboard-section is hidden.
-8. TC-003: log in first, wait for dashboard-title, locate logout using
-   By.ID, "logout-button", click it, wait for username to be visible, and
-   verify dashboard-section is hidden. Never guess another selector.
+8. TC-003: log in using TEST_USERNAME and TEST_PASSWORD, wait for
+   dashboard-title, locate logout using By.ID, "logout-button", click it,
+   wait for username to be visible, and verify dashboard-section is hidden.
+   Never guess another selector.
 9. Use a pytest fixture with yield and close the browser in finally.
-   Do not force headless mode. Set window size to 1920x1080. If CHROME_BIN
-   is set, configure options.binary_location. If CHROMEDRIVER_PATH is set,
-   use it for ChromeDriver; otherwise use Selenium driver discovery.
+   Do not force headless mode. Set window size to 1920x1080.
+   If CHROME_BIN is set, configure options.binary_location.
+   If CHROMEDRIVER_PATH is set, import Service from
+   selenium.webdriver.chrome.service and use:
+   webdriver.Chrome(service=Service(driver_path), options=options)
+   Otherwise use webdriver.Chrome(options=options) for Selenium
+   driver discovery. Never use executable_path.
    Never use input() or pause for keyboard input.
 10. Generate API tests only for API cases in Jira. If TC-004 is present,
     generate a Karate test using the configured endpoint, method, payload,
-    and expected response fields.
+    and expected response fields. Read credentials from:
+    karate.properties['test.username'] and
+    karate.properties['test.password'].
 11. Report genuinely missing information in missing_details.
 12. Return exactly one valid JSON object with keys ui_pytest, api_karate,
     and missing_details. Source code values must be valid JSON strings.
     Return no Markdown fences or explanation outside the JSON.
 """
+
     system_prompt = """
 You are a senior test automation engineer. Return exactly one valid JSON
 object with keys ui_pytest, api_karate, and missing_details.
@@ -293,8 +305,14 @@ Python:
 - Use explicit waits and meaningful assertions.
 - Close the browser in try/finally.
 - Support CHROME_BIN and CHROMEDRIVER_PATH if configured.
-- Do not force headless mode, use input(), TODOs, empty tests, placeholders,
-  or skips.
+- When CHROMEDRIVER_PATH is set, use
+  selenium.webdriver.chrome.service.Service.
+- Never use the deprecated executable_path argument.
+- Read valid credentials from TEST_USERNAME and TEST_PASSWORD.
+- Fail clearly if required environment variables are missing.
+- Never hardcode valid credentials.
+- Do not force headless mode, use input(), TODOs, empty tests,
+  placeholders, or skips.
 - Use dashboard visibility to confirm successful login.
 - Use By.ID, "logout-button" for logout and verify logged-out state.
 - Use the exact function names specified in the prompt.
@@ -302,6 +320,9 @@ Python:
 Karate:
 - Generate valid Karate syntax for the supplied API cases.
 - Verify expected HTTP status and response fields.
+- Read credentials from karate.properties['test.username'] and
+  karate.properties['test.password'].
+- Never hardcode valid credentials.
 - If no API case is present, api_karate may be an empty string.
 
 Missing information:
@@ -312,21 +333,27 @@ JSON:
 - Source values must be valid JSON strings.
 - Return no Markdown fences or explanation outside the JSON object.
 """
+
     result = parse_json_response(call_groq(system_prompt, prompt))
 
     for key in ("ui_pytest", "api_karate", "missing_details"):
         if key not in result:
-            raise ValueError(f"Groq response is missing required key: {key}")
+            raise ValueError(
+                f"Groq response is missing required key: {key}"
+            )
+
     if not isinstance(result["missing_details"], list):
         raise ValueError("missing_details must be a JSON array.")
 
     ui_script = normalize_generated_code(result.get("ui_pytest"))
     api_script = normalize_generated_code(result.get("api_karate"))
+
     result["ui_pytest"] = ui_script
     result["api_karate"] = api_script
 
     if not ui_script:
         raise ValueError("Groq generated an empty UI pytest script.")
+
     try:
         tree = ast.parse(ui_script)
     except SyntaxError as exc:
@@ -335,7 +362,6 @@ JSON:
             f"line={exc.lineno}, source={exc.text!r}"
         ) from exc
 
-    
     function_nodes = {
         node.name: node
         for node in ast.walk(tree)
@@ -371,9 +397,11 @@ JSON:
 
     logout_node = function_nodes[logout_name]
     lines = ui_script.splitlines()
+
     end_line = getattr(
         logout_node, "end_lineno", logout_node.lineno
     )
+
     logout_body = "\n".join(
         lines[logout_node.lineno - 1:end_line]
     )
@@ -407,39 +435,50 @@ JSON:
 
     return result
 
-
-
 def _write_text(path, content):
     """Write UTF-8 text, creating parent folders if necessary."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
 
+
 def generate_scripts(ticket):
-    """Generate test artifacts from Jira, save them, and publish to GitHub."""
+    """Generate and save test artifacts from Jira. Never publish to GitHub."""
     print("AI Test Generator Started")
     print("Issue:", ticket.get("issue_key"))
     print("Summary:", ticket.get("summary"))
+
     if not os.getenv("GROQ_API_KEY"):
         raise ValueError("GROQ_API_KEY is missing from .env")
 
-    issue_key = ticket.get("issue_key") or "UNKNOWN"
+    issue_key = ticket.get("issue_key")
+    if not issue_key:
+        raise ValueError("Jira ticket is missing issue_key.")
 
     extracted = extract_test_cases(ticket)
     test_cases = extracted["test_cases"]
     print("Test cases extracted:", len(test_cases))
 
     generated = generate_automation_scripts(ticket, test_cases)
+
     ui_script = generated["ui_pytest"]
     api_script = generated["api_karate"]
 
-    output_dir = Path("generated_tests") / issue_key
+    project_root = Path(__file__).resolve().parent.parent
+    output_dir = project_root / "generated_tests" / issue_key
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Remove stale test files so a previous generation cannot run accidentally.
+    for filename in ("test_ui.py", "test_api.feature"):
+        stale_file = output_dir / filename
+        if stale_file.exists():
+            stale_file.unlink()
+
     _write_text(
         output_dir / "test_cases.json",
         json.dumps(extracted, indent=2, ensure_ascii=False),
     )
-    
+
     if ui_script:
         _write_text(output_dir / "test_ui.py", ui_script + "\n")
 
@@ -454,25 +493,19 @@ def generate_scripts(ticket):
         + ("\n" if missing else ""),
     )
 
-    print("Generated test files in:", output_dir.resolve())
+    print("Generated test files in:", output_dir)
+
     if missing:
         print("Some details need to be configured:")
         for detail in missing:
             print("-", detail)
 
-    publish_result = publish_generated_tests(
-        issue_key=issue_key,
-        labels=ticket.get("labels", []),
-        output_dir=output_dir,
-        repo_dir=Path.cwd(),
-        base_branch=os.getenv("GIT_BASE_BRANCH", "main"),
-        summary=ticket.get("summary", ""),
-    )
-    print("Git publishing completed:", publish_result)
-    if isinstance(publish_result, dict):
-        print("Pull request URL:", publish_result.get("pr_url"))
+    print("Test generation completed. No Git push or PR was performed.")
 
-    return {**generated, "git": publish_result}
+    return {
+        **generated,
+        "output_dir": str(output_dir),
+    }
 
 
 if __name__ == "__main__":
