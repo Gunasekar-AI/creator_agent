@@ -8,8 +8,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from groq import BadRequestError, Groq
 
-from app.git_publisher import publish_generated_tests
-
 
 load_dotenv()
 
@@ -416,10 +414,12 @@ def _write_text(path, content):
 
 
 def generate_scripts(ticket):
-    """Generate test artifacts from Jira, save them, and publish to GitHub."""
+    """Generate test artifacts from Jira without publishing them."""
+
     print("AI Test Generator Started")
     print("Issue:", ticket.get("issue_key"))
     print("Summary:", ticket.get("summary"))
+
     if not os.getenv("GROQ_API_KEY"):
         raise ValueError("GROQ_API_KEY is missing from .env")
 
@@ -427,19 +427,22 @@ def generate_scripts(ticket):
 
     extracted = extract_test_cases(ticket)
     test_cases = extracted["test_cases"]
+
     print("Test cases extracted:", len(test_cases))
 
     generated = generate_automation_scripts(ticket, test_cases)
+
     ui_script = generated["ui_pytest"]
     api_script = generated["api_karate"]
 
     output_dir = Path("generated_tests") / issue_key
     output_dir.mkdir(parents=True, exist_ok=True)
+
     _write_text(
         output_dir / "test_cases.json",
         json.dumps(extracted, indent=2, ensure_ascii=False),
     )
-    
+
     if ui_script:
         _write_text(output_dir / "test_ui.py", ui_script + "\n")
 
@@ -455,25 +458,13 @@ def generate_scripts(ticket):
     )
 
     print("Generated test files in:", output_dir.resolve())
+
     if missing:
         print("Some details need to be configured:")
         for detail in missing:
             print("-", detail)
 
-    publish_result = publish_generated_tests(
-        issue_key=issue_key,
-        labels=ticket.get("labels", []),
-        output_dir=output_dir,
-        repo_dir=Path.cwd(),
-        base_branch=os.getenv("GIT_BASE_BRANCH", "main"),
-        summary=ticket.get("summary", ""),
-    )
-    print("Git publishing completed:", publish_result)
-    if isinstance(publish_result, dict):
-        print("Pull request URL:", publish_result.get("pr_url"))
-
-    return {**generated, "git": publish_result}
-
+    return generated
 
 if __name__ == "__main__":
     from app.jira_reader import JiraReader

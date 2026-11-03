@@ -1,50 +1,130 @@
-
 import os
 import hmac
 import hashlib
 import logging
-import subprocess
-import sys
 from pathlib import Path
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
 
+from app.change_detector import (
+    detect_ticket_change,
+    save_ticket_snapshot,
+)
+from app.local_test_runner import run_ticket_tests
+from app.git_publisher import (
+    prepare_generated_tests,
+    publish_tested_branch,
+)
 from app.jira_reader import JiraReader
 from app.test_generator import generate_scripts
+
+
 
 app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Project root: C:\projects\creator
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-
 def process_jira_issue(issue_key):
-    """Generate tests and publish a PR. Tests run after merge to main."""
-    try:
-        logger.info("AI Test Generator Started")
-        logger.info("Issue: %s", issue_key)
+    """Generate, test, and publish Jira automation safely."""
 
-        # 1. Fetch the latest issue from Jira
+    try:
+        logger.info("Starting automation for %s", issue_key)
+
+        # 1. Retrieve the Jira ticket.
         jira = JiraReader()
         ticket = jira.get_ticket(issue_key)
 
-        # 2. Generate test scripts and publish the GitHub PR
-        generate_scripts(ticket)
+        # 2. Detect whether the ticket has changed.
+        change = detect_ticket_change(ticket)
+        status = change["status"]
 
-        # 3. Do not execute pytest locally.
-        # GitHub Actions will run the tests after the PR
-        # is merged into main.
+        logger.info("Ticket change status: %s", status)
+
+        if status == "unchanged":
+            logger.info("No changes detected. Skipping %s.", issue_key)
+            return
+
+        if status == "changed":
+            logger.info(
+                "Ticket changed. Full regeneration will be used "
+                "until targeted incremental patching is implemented."
+            )
+
+        # 3. Generate tests locally. Never publish from the generator.
+        generated = generate_scripts(ticket)
+
+        issue_output = PROJECT_ROOT / "generated_tests" / issue_key
+
+        if not (issue_output / "test_ui.py").exists():
+            raise RuntimeError("Generated UI test file is missing.")
+
+        if not (issue_output / "test_api.feature").exists():
+            raise RuntimeError("Generated API feature file is missing.")
+
+        # 4. Prepare a local branch and commit.
+        prepared = prepare_generated_tests(
+            issue_key=issue_key,
+            labels=ticket.get("labels", []),
+            output_dir=issue_output,
+            repo_dir=PROJECT_ROOT,
+            base_branch=os.getenv("GITHUB_BASE_BRANCH", "main"),
+        )
+
         logger.info(
-            "Test generation and PR publishing completed for %s. "
-            "Waiting for PR merge into main to run tests.",
+            "Prepared branch %s at commit %s",
+            prepared["branch"],
+            prepared["commit"],
+        )
+
+        # 5. Run both UI and API tests against that commit.
+        test_summary = run_ticket_tests(
+            issue_key=issue_key,
+            run_ui=True,
+            run_api=True,
+        )
+
+        # 6. Verify the test run is for the exact prepared commit.
+        if test_summary.get("git_commit") != prepared["commit"]:
+            raise RuntimeError(
+                "Tested commit does not match prepared commit. "
+                "Refusing to publish."
+            )
+
+        if test_summary.get("overall_status") != "PASS":
+            logger.error(
+                "Tests failed for %s. No push or PR will be created.",
+                issue_key,
+            )
+            return
+
+        # 7. Publish only after both suites pass.
+        result = publish_tested_branch(
+            issue_key=issue_key,
+            prepared=prepared,
+            test_summary=test_summary,
+            repo_dir=PROJECT_ROOT,
+            summary=ticket.get("summary", ""),
+        )
+
+        # 8. Save the Jira snapshot only after successful publication.
+        save_ticket_snapshot(ticket)
+
+        logger.info(
+            "PR successfully published for %s: %s",
             issue_key,
+            result["pr_url"],
         )
 
     except Exception:
-        logger.exception("Failed to process Jira issue %s", issue_key)
+        logger.exception(
+            "Automation failed for Jira issue %s",
+            issue_key,
+        )
+
 
 @app.post("/webhook/jira")
 async def jira_webhook(

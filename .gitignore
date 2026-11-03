@@ -24,3 +24,28 @@ __pycache__/
 # OS files
 Thumbs.db
 .DS_Store
+
+.env
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+test-results/
+state/
+karate-runner/target/
+
+# Secrets and environment
+.env
+
+# Python
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Runtime artifacts
+test-results/
+state/
+
+# Java / Maven
+karate-runner/target/
