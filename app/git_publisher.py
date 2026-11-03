@@ -502,3 +502,95 @@ def publish_generated_tests(*args, **kwargs):
         "Direct publishing is disabled. Use prepare_generated_tests(), "
         "run the tests, then call publish_tested_branch()."
     )
+
+
+def find_open_pr(repo, branch, base_branch):
+    """Find an existing open PR for a Jira branch."""
+    result = run_command(
+        [
+            "gh", "pr", "list",
+            "--head", branch,
+            "--base", base_branch,
+            "--state", "open",
+            "--json", "url",
+        ],
+        cwd=repo,
+    )
+
+    prs = json.loads(result.stdout or "[]")
+    return prs[0]["url"] if prs else None
+
+
+def add_test_failure_comment(
+    repo,
+    issue_key,
+    branch,
+    base_branch,
+    test_summary,
+):
+    """Comment on an existing PR when tests fail, without publishing."""
+    ensure_github_cli(repo)
+
+    pr_url = find_open_pr(repo, branch, base_branch)
+
+    if not pr_url:
+        print(
+            f"No existing PR found for {issue_key}. "
+            "Failure evidence remains in test-results."
+        )
+        return None
+
+    lines = [
+        "## Automated Test Execution — FAILED",
+        "",
+        f"**Jira:** {issue_key}",
+        f"**Tested commit:** `{test_summary.get('git_commit', 'unknown')}`",
+        f"**Overall status:** {test_summary.get('overall_status', 'UNKNOWN')}",
+        "",
+        "| Suite | Status | Exit code |",
+        "|---|---|---:|",
+    ]
+
+    for suite in test_summary.get("suites", []):
+        lines.append(
+            f"| {suite.get('suite', 'Unknown')} "
+            f"| {suite.get('status', 'UNKNOWN')} "
+            f"| {suite.get('exit_code', 'N/A')} |"
+        )
+
+    for suite in test_summary.get("suites", []):
+        if suite.get("status") == "PASS":
+            continue
+
+        lines.extend([
+            "",
+            f"### {suite.get('suite', 'Test')} failure",
+            f"Log: `{suite.get('log', 'Not available')}`",
+            "",
+            "```text",
+            str(
+                suite.get("failure_excerpt")
+                or suite.get("message")
+                or "No failure output captured."
+            )[:6000],
+            "```",
+        ])
+
+    lines.extend([
+        "",
+        f"Evidence: `{test_summary.get('evidence_dir', 'Not available')}`",
+        "",
+        "**Publication blocked: required tests did not pass.**",
+    ])
+
+    run_command(
+        [
+            "gh", "pr", "comment",
+            pr_url,
+            "--body",
+            "\n".join(lines),
+        ],
+        cwd=repo,
+    )
+
+    return pr_url

@@ -1,11 +1,9 @@
-
 import argparse
 import json
 import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,12 +22,46 @@ KARATE_FEATURE = (
 KARATE_REPORT_DIR = KARATE_DIR / "target" / "karate-reports"
 
 
-def run_suite(name, command, log_path, cwd=REPO_DIR):
-    """Run one suite, preserve its output, and return its status."""
+def redact_secrets(text):
+    """Remove known secret values from captured output."""
+    text = str(text or "")
 
+    for name in ("TEST_PASSWORD", "GROQ_API_KEY", "JIRA_API_TOKEN",
+                 "GITHUB_TOKEN", "JIRA_WEBHOOK_SECRET"):
+        value = os.getenv(name)
+        if value:
+            text = text.replace(value, "<redacted>")
+
+    return text
+
+
+def write_log(log_path, content):
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    safe_content = redact_secrets(content)
+    log_path.write_text(safe_content, encoding="utf-8")
+    return safe_content
+
+
+def failure_excerpt(output, max_chars=6000):
+    """Return a useful, bounded excerpt for PR comments."""
+    output = redact_secrets(output).strip()
+
+    if not output:
+        return "No output was captured."
+
+    if len(output) > max_chars:
+        output = (
+            output[-max_chars:]
+            + "\n\n[Earlier output omitted. See full test log artifact.]"
+        )
+
+    return output
+
+
+def run_suite(name, command, log_path, cwd=REPO_DIR):
+    """Run one suite and preserve output, including failures and timeouts."""
     started = time.time()
 
-    # Never print the test password in terminal logs.
     display_command = [
         "-DTEST_PASSWORD=<redacted>"
         if str(arg).startswith("-DTEST_PASSWORD=")
@@ -52,73 +84,98 @@ def run_suite(name, command, log_path, cwd=REPO_DIR):
             stderr=subprocess.STDOUT,
             errors="replace",
             timeout=600,
+            check=False,
         )
 
         output = result.stdout or ""
         exit_code = result.returncode
         status = "PASS" if exit_code == 0 else "FAIL"
 
+    except subprocess.TimeoutExpired as exc:
+        captured = exc.stdout or ""
+        if isinstance(captured, bytes):
+            captured = captured.decode("utf-8", errors="replace")
+
+        output = (
+            "Test suite timed out after 600 seconds.\n"
+            + captured
+        )
+        exit_code = 124
+        status = "FAIL"
+
     except OSError as exc:
         output = f"Could not start command: {exc}\n"
         exit_code = 127
         status = "ERROR"
 
+    output = write_log(log_path, output)
+
     print(output, end="" if output.endswith("\n") else "\n")
 
-    log_path.write_text(output, encoding="utf-8")
-
-    return {
+    result_data = {
         "suite": name,
         "status": status,
         "exit_code": exit_code,
         "duration_seconds": round(time.time() - started, 2),
         "log": str(log_path.relative_to(REPO_DIR)),
+        "failure_excerpt": (
+            failure_excerpt(output)
+            if status != "PASS"
+            else ""
+        ),
     }
 
+    return result_data
+
+
+def api_error_result(output_dir, message, exit_code=2):
+    """Create a consistent API error result and log."""
+    log_path = output_dir / "api.log"
+    output = write_log(log_path, message)
+
+    return {
+        "suite": "API",
+        "status": "ERROR",
+        "exit_code": exit_code,
+        "duration_seconds": 0,
+        "log": str(log_path.relative_to(REPO_DIR)),
+        "failure_excerpt": failure_excerpt(output),
+    }
 
 
 def run_api_suite(api_file, output_dir):
     """Run Karate while restoring the original Maven feature file."""
-
     if not api_file.exists():
-        return {
-            "suite": "API",
-            "status": "ERROR",
-            "exit_code": 2,
-            "message": f"API feature file not found: {api_file}",
-        }
+        return api_error_result(
+            output_dir,
+            f"API feature file not found: {api_file}",
+        )
 
     if not (KARATE_DIR / "pom.xml").exists():
-        return {
-            "suite": "API",
-            "status": "ERROR",
-            "exit_code": 2,
-            "message": f"Maven project not found: {KARATE_DIR}",
-        }
+        return api_error_result(
+            output_dir,
+            f"Maven project not found: {KARATE_DIR}",
+        )
 
     mvn = shutil.which("mvn")
     if not mvn:
-        return {
-            "suite": "API",
-            "status": "ERROR",
-            "exit_code": 127,
-            "message": "Maven was not found on PATH.",
-        }
+        return api_error_result(
+            output_dir,
+            "Maven was not found on PATH.",
+            127,
+        )
 
     required = ["BASE_URL", "TEST_USERNAME", "TEST_PASSWORD"]
     missing = [name for name in required if not os.getenv(name)]
 
     if missing:
-        return {
-            "suite": "API",
-            "status": "ERROR",
-            "exit_code": 2,
-            "message": "Missing environment variables: " + ", ".join(missing),
-        }
+        return api_error_result(
+            output_dir,
+            "Missing environment variables: " + ", ".join(missing),
+        )
 
     KARATE_FEATURE.parent.mkdir(parents=True, exist_ok=True)
 
-    # Keep the original tracked feature safe.
     original_exists = KARATE_FEATURE.exists()
     original_content = (
         KARATE_FEATURE.read_bytes() if original_exists else None
@@ -152,14 +209,16 @@ def run_api_suite(api_file, output_dir):
                 destination,
                 dirs_exist_ok=True,
             )
-            result["html_report"] = str(
-                (destination / "karate-summary.html").relative_to(REPO_DIR)
-            )
+
+            report = destination / "karate-summary.html"
+            if report.exists():
+                result["html_report"] = str(
+                    report.relative_to(REPO_DIR)
+                )
 
         return result
 
     finally:
-        # Restore the exact original bytes or remove the temporary file.
         if original_exists:
             KARATE_FEATURE.write_bytes(original_content)
         elif KARATE_FEATURE.exists():
@@ -189,14 +248,24 @@ def get_current_git_commit():
     return result.stdout.strip()
 
 
+def write_summary(summary, output_dir):
+    """Persist summary even when one or more suites fail."""
+    summary_path = output_dir / "summary.json"
+
+    summary["summary_path"] = str(
+        summary_path.relative_to(REPO_DIR)
+    )
+
+    summary_path.write_text(
+        json.dumps(summary, indent=2),
+        encoding="utf-8",
+    )
+
+    return summary
+
+
 def run_ticket_tests(issue_key, run_ui=True, run_api=True):
-    """
-    Run UI and API tests for a Jira ticket.
-
-    This function can be called by the webhook or another Python module.
-    It returns a structured summary instead of exiting the process.
-    """
-
+    """Run selected UI/API suites and save all available evidence."""
     issue_key = issue_key.upper()
 
     if not all(c.isalnum() or c == "-" for c in issue_key):
@@ -206,12 +275,10 @@ def run_ticket_tests(issue_key, run_ui=True, run_api=True):
         raise ValueError("At least one test suite must be selected.")
 
     issue_dir = REPO_DIR / "generated_tests" / issue_key
-
     ui_file = issue_dir / "test_ui.py"
     api_file = issue_dir / "test_api.feature"
 
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-
     output_dir = RESULTS_DIR / issue_key / run_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -224,13 +291,22 @@ def run_ticket_tests(issue_key, run_ui=True, run_api=True):
         "suites": [],
     }
 
-    # Run Selenium UI tests.
-    if run_ui:
-        if ui_file.exists():
-            junit_file = output_dir / "pytest-report.xml"
+    try:
+        if run_ui:
+            if not ui_file.exists():
+                summary["suites"].append({
+                    "suite": "UI",
+                    "status": "ERROR",
+                    "exit_code": 2,
+                    "duration_seconds": 0,
+                    "failure_excerpt": (
+                        f"Requested UI test file not found: {ui_file}"
+                    ),
+                })
+            else:
+                junit_file = output_dir / "pytest-report.xml"
 
-            summary["suites"].append(
-                run_suite(
+                ui_result = run_suite(
                     "UI",
                     [
                         sys.executable,
@@ -244,22 +320,29 @@ def run_ticket_tests(issue_key, run_ui=True, run_api=True):
                     ],
                     output_dir / "ui.log",
                 )
+
+                if junit_file.exists():
+                    ui_result["junit_report"] = str(
+                        junit_file.relative_to(REPO_DIR)
+                    )
+
+                summary["suites"].append(ui_result)
+
+        if run_api:
+            summary["suites"].append(
+                run_api_suite(api_file, output_dir)
             )
-        else:
-            summary["suites"].append({
-                "suite": "UI",
-                "status": "ERROR",
-                "exit_code": 2,
-                "message": f"UI test file not found: {ui_file}",
-            })
 
-    # Run Karate API tests.
-    if run_api:
-        summary["suites"].append(
-            run_api_suite(api_file, output_dir)
-        )
+    except Exception as exc:
+        summary["runner_error"] = redact_secrets(str(exc))
+        summary["suites"].append({
+            "suite": "RUNNER",
+            "status": "ERROR",
+            "exit_code": 1,
+            "duration_seconds": 0,
+            "failure_excerpt": failure_excerpt(str(exc)),
+        })
 
-    # Calculate overall status.
     statuses = [
         suite["status"]
         for suite in summary["suites"]
@@ -277,16 +360,7 @@ def run_ticket_tests(issue_key, run_ui=True, run_api=True):
         timezone.utc
     ).isoformat()
 
-    summary_path = output_dir / "summary.json"
-
-    summary["summary_path"] = str(
-        summary_path.relative_to(REPO_DIR)
-    )
-
-    summary_path.write_text(
-        json.dumps(summary, indent=2),
-        encoding="utf-8",
-    )
+    summary = write_summary(summary, output_dir)
 
     print("\n" + "=" * 70)
     print("SUITE RESULTS")
@@ -296,7 +370,7 @@ def run_ticket_tests(issue_key, run_ui=True, run_api=True):
 
     print(f"\nOverall: {summary['overall_status']}")
     print(f"Evidence folder: {output_dir}")
-    print(f"Summary: {summary_path}")
+    print(f"Summary: {output_dir / 'summary.json'}")
 
     return summary
 
@@ -306,22 +380,9 @@ def main():
         description="Run local UI and API automation for a Jira ticket."
     )
 
-    parser.add_argument(
-        "issue_key",
-        help="Jira key, e.g. SCRUM-2",
-    )
-
-    parser.add_argument(
-        "--ui-only",
-        action="store_true",
-        help="Run only Selenium/pytest tests.",
-    )
-
-    parser.add_argument(
-        "--api-only",
-        action="store_true",
-        help="Run only Karate API tests.",
-    )
+    parser.add_argument("issue_key", help="Jira key, e.g. SCRUM-2")
+    parser.add_argument("--ui-only", action="store_true")
+    parser.add_argument("--api-only", action="store_true")
 
     args = parser.parse_args()
 

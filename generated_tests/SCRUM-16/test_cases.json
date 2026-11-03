@@ -1,0 +1,20 @@
+{
+  "test_cases": [
+    {
+      "test_id": "TC-001",
+      "test_type": "ui",
+      "title": "Successful Login with valid credentials",
+      "preconditions": [
+        "Login page is open",
+        "Valid test credentials are available through environment variables",
+        "Application is running and accessible"
+      ],
+      "steps": [
+        "Enter valid credentials",
+        "Click the login button"
+      ],
+      "expected_result": "Dashboard is displayed with correct title and welcome message, and login form is no longer displayed",
+      "missing_details": []
+    }
+  ]
+}
