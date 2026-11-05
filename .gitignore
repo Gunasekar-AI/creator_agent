@@ -1,26 +1,20 @@
-# Environment files
-.env
-.env.*
-
-# Virtual environments
+```gitignore
+# Python
 venv/
-.venv/
-env/
-
-# Python cache
 __pycache__/
-*.pyc
-
-# IDE files
-.vscode/
-.idea/
-
-# Logs
-*.log
-
-# Test cache
+*.py[cod]
 .pytest_cache/
 
-# OS files
-Thumbs.db
-.DS_Store
+# Secrets
+.env
+
+# Test evidence and runtime state
+test-results/
+state/
+
+# Maven build output
+**/target/
+
+# Browser/test output
+*.log
+```

@@ -5,6 +5,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.service import Service
 
 @pytest.fixture(scope="function")
 def browser():
@@ -14,7 +15,10 @@ def browser():
     options.add_argument("--window-size=1920,1080")
     driver_path = os.getenv("CHROMEDRIVER_PATH")
     if driver_path:
-        driver = webdriver.Chrome(executable_path=driver_path, options=options)
+        driver = webdriver.Chrome(
+            service=Service(driver_path),
+            options=options
+        )
     else:
         driver = webdriver.Chrome(options=options)
     try:
