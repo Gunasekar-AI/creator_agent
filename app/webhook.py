@@ -166,7 +166,44 @@ def process_jira_issue(issue_key):
                 "Refusing to publish."
             )
 
-        # 6. Persist DEV execution + results from the UI JUnit XML.
+                # 6. Persist DEV execution + results.
+        #    The runner writes pytest-report.xml (not pytest-results.xml).
+        evidence_dir = Path(test_summary["evidence_dir"])
+        junit_path = evidence_dir / "pytest-report.xml"
+        if not junit_path.exists():
+            junit_path = evidence_dir / "pytest-results.xml"  # fallback
+        counts = parse_junit_counts(junit_path)
+
+        # 6a. Guard: 0 tests collected = failing run, do not hit the gate.
+        if counts["total"] == 0:
+            logger.error(
+                "No tests collected for %s. Recording a failing run.",
+                issue_key,
+            )
+            execution_id = persist_dev_execution(
+                script_id=_get_any_script_id(issue_key),
+                execution_status="FAILED",
+                framework_name="pytest",
+                execution_type="MANUAL",
+                completed_at=datetime.now(timezone.utc),
+                rollback_status="not_required",
+                error_message="pytest collected 0 tests",
+            )
+            persist_dev_execution_results(
+                execution_id=execution_id,
+                total_tests=1, passed_tests=0,
+                failed_tests=1, skipped_tests=0,
+                result_status="FAIL",
+            )
+            evaluate_promotion_eligibility(
+                execution_id=execution_id,
+                total_tests=1, passed_tests=0,
+                threshold_value=float(
+                    os.getenv("DEV_PROMOTION_THRESHOLD", "95")
+                ),
+            )
+            return
+
         ui_suite = next(
             (s for s in test_summary.get("suites", []) if s["suite"] == "UI"),
             None,
@@ -174,14 +211,8 @@ def process_jira_issue(issue_key):
         if ui_suite is None:
             raise RuntimeError("UI suite not found in test summary.")
 
-        counts = parse_junit_counts(
-            Path(test_summary["evidence_dir"]) / "pytest-results.xml"
-        )
-
-        script_id = _get_any_script_id(issue_key)
-
         execution_id = persist_dev_execution(
-            script_id=script_id,
+            script_id=_get_any_script_id(issue_key),
             execution_status=(
                 "COMPLETED" if ui_suite["status"] == "PASS" else "FAILED"
             ),
@@ -207,12 +238,16 @@ def process_jira_issue(issue_key):
             ),
         )
 
-        # 7. Promotion gate.
+        # 7. Promotion gate uses OVERALL run status, not just UI pass%.
+        #    API passed here but UI failed → overall FAIL → NOT_ELIGIBLE.
         threshold = float(os.getenv("DEV_PROMOTION_THRESHOLD", "95"))
+        overall_pass = test_summary.get("overall_status") == "PASS"
+        gate_passed = counts["passed"] if overall_pass else 0
+
         gate = evaluate_promotion_eligibility(
             execution_id=execution_id,
             total_tests=counts["total"],
-            passed_tests=counts["passed"],
+            passed_tests=gate_passed,
             threshold_value=threshold,
         )
         logger.info(
