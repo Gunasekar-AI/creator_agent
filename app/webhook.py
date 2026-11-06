@@ -1,207 +1,287 @@
+
 import os
 import hmac
 import hashlib
+import json
 import logging
 from pathlib import Path
-import json
+import shutil
+import tempfile
+from datetime import datetime, timezone
+from datetime import datetime, timezone
+
+from app.db.repository import persist_generated_artifacts
+
+from app.dev_execution_repository import (
+    persist_dev_execution,
+    persist_dev_execution_results,
+    evaluate_promotion_eligibility,
+)
+from app.test_summary_parser import parse_junit_counts
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException, Request
-
-from app.change_detector import (
-    detect_ticket_change,
-    save_ticket_snapshot,
-)
-from app.local_test_runner import run_ticket_tests
-from app.git_publisher import (
-    prepare_generated_tests,
-    publish_tested_branch,
-    add_test_failure_comment,
-)
+from app.test_summary_parser import parse_junit_counts
 from app.jira_reader import JiraReader
 from app.test_generator import generate_scripts
-
-
+from app.local_test_runner import run_ticket_tests
+from app.git_publisher import (
+    create_or_reuse_pr,
+    ensure_github_cli,
+    get_changed_paths,
+    make_branch_name,
+    path_is_inside,
+    prepare_generated_tests,
+    publish_tested_branch,
+    run_git,
+)
 
 app = FastAPI()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-def process_jira_issue(issue_key):
-    """Generate, test, and publish Jira automation safely."""
+def get_requested_test_layers(issue_key):
+    """Determine which test suites were generated for this Jira issue."""
+    cases_file = (
+        PROJECT_ROOT / "generated_tests" / issue_key / "test_cases.json"
+    )
 
+    if not cases_file.exists():
+        raise RuntimeError(f"Test cases file not found: {cases_file}")
+
+    data = json.loads(cases_file.read_text(encoding="utf-8"))
+    cases = data.get("test_cases", [])
+
+    test_types = {
+        str(case.get("test_type", "")).strip().lower()
+        for case in cases
+    }
+
+    run_ui = "ui" in test_types
+    run_api = "api" in test_types
+
+    if not run_ui and not run_api:
+        raise RuntimeError(
+            f"No supported UI or API test cases found for {issue_key}."
+        )
+
+    return run_ui, run_api
+
+def _get_any_script_id(issue_key: str) -> int:
+    """Return any dev_generated_scripts.script_id created for this issue."""
+    from sqlalchemy import text
+    from app.db.database import SessionLocal
+
+    with SessionLocal() as db:
+        row = db.execute(
+            text("""
+                SELECT s.script_id
+                FROM dev_generated_scripts s
+                JOIN dev_planner_mapping m
+                  ON m.test_case_id = s.test_case_id
+                WHERE m.jira_ticket_id = :issue_key
+                ORDER BY s.script_id
+                LIMIT 1
+            """),
+            {"issue_key": issue_key},
+        ).fetchone()
+
+    if row is None:
+        raise RuntimeError(
+            f"No dev_generated_scripts row found for {issue_key}."
+        )
+    return row[0]
+
+def process_jira_issue(issue_key):
+    """DEV: generate → persist → prepare → run → persist results → gate → publish."""
     try:
         logger.info("Starting automation for %s", issue_key)
 
-        # 1. Retrieve the Jira ticket.
+        # 1. Fetch Jira issue.
         jira = JiraReader()
         ticket = jira.get_ticket(issue_key)
+        if not isinstance(ticket, dict):
+            raise RuntimeError("JiraReader returned an unexpected ticket format.")
 
-        # 2. Detect whether the ticket has changed.
-        change = detect_ticket_change(ticket)
-        status = change["status"]
+        # 2. Generate UI/API tests (writes generated_tests/<issue>/ on disk).
+        generate_scripts(ticket)
 
-        logger.info("Ticket change status: %s", status)
+        output_dir = PROJECT_ROOT / "generated_tests" / issue_key
+        if not output_dir.is_dir():
+            raise RuntimeError(f"Generated output not found: {output_dir}")
 
-        if status == "unchanged":
-            logger.info("No changes detected. Skipping %s.", issue_key)
-            return
+        # 3. Persist DEV planner mappings + generated scripts.
+        cases_file = output_dir / "test_cases.json"
+        test_cases = json.loads(
+            cases_file.read_text(encoding="utf-8")
+        ).get("test_cases", [])
 
-        if status == "changed":
-            logger.info(
-                "Ticket changed. Full regeneration will be used "
-                "until targeted incremental patching is implemented."
-            )
+        labels = ticket.get("labels", []) or []
+        if not isinstance(labels, list):
+            labels = [labels]
 
-        
-        # 3. Generate tests locally. Never publish from the generator.
-        generated = generate_scripts(ticket)
+        branch_name = make_branch_name(issue_key, labels)
 
-        issue_output = PROJECT_ROOT / "generated_tests" / issue_key
-
-        # Determine requested test layers from extracted Jira cases.
-        extracted_path = issue_output / "test_cases.json"
-
-        if not extracted_path.exists():
-            raise RuntimeError("Extracted test cases file is missing.")
-
-        with extracted_path.open("r", encoding="utf-8") as file:
-            extracted = json.load(file)
-
-        test_cases = extracted.get("test_cases", [])
-
-        run_ui = any(
-            str(case.get("test_type", "")).lower() == "ui"
-            for case in test_cases
+        persisted = persist_generated_artifacts(
+            issue_key=issue_key,
+            test_cases=test_cases,
+            output_dir=output_dir,
+            git_branch=branch_name,
         )
+        logger.info("DEV artifacts persisted: %s", persisted)
 
-        run_api = any(
-            str(case.get("test_type", "")).lower() == "api"
-            for case in test_cases
-        )
-
-        if not run_ui and not run_api:
-            raise RuntimeError(
-                f"No supported UI or API test cases found for {issue_key}."
-            )
-
-        # Check only the files required by Jira.
-        if run_ui and not (issue_output / "test_ui.py").exists():
-            raise RuntimeError("Generated UI test file is missing.")
-
-        if run_api and not (issue_output / "test_api.feature").exists():
-            raise RuntimeError("Generated API feature file is missing.")
-
+        # 4. Determine requested suites + prepare branch.
+        run_ui, run_api = get_requested_test_layers(issue_key)
         logger.info(
-            "Requested test layers for %s: UI=%s, API=%s",
-            issue_key,
-            run_ui,
-            run_api,
+            "Requested layers for %s: UI=%s API=%s",
+            issue_key, run_ui, run_api,
         )
 
-        # 4. Prepare a local branch and commit.
         prepared = prepare_generated_tests(
             issue_key=issue_key,
-            labels=ticket.get("labels", []),
-            output_dir=issue_output,
+            labels=labels,
+            output_dir=output_dir,
             repo_dir=PROJECT_ROOT,
-            base_branch=os.getenv("GITHUB_BASE_BRANCH", "main"),
+            base_branch=os.getenv("GIT_BASE_BRANCH", "main"),
         )
-
         logger.info(
             "Prepared branch %s at commit %s",
-            prepared["branch"],
-            prepared["commit"],
+            prepared["branch"], prepared["commit"],
         )
 
-        # 5. Run only the requested test suites.
+        # 5. Run tests.
         test_summary = run_ticket_tests(
-            issue_key=issue_key,
-            run_ui=run_ui,
-            run_api=run_api,
+            issue_key=issue_key, run_ui=run_ui, run_api=run_api,
+        )
+        logger.info(
+            "Test result for %s: %s",
+            issue_key, test_summary.get("overall_status"),
         )
 
-        # 6. Verify the test run is for the exact prepared commit.
         if test_summary.get("git_commit") != prepared["commit"]:
             raise RuntimeError(
                 "Tested commit does not match prepared commit. "
                 "Refusing to publish."
             )
 
-        if test_summary.get("overall_status") != "PASS":
-            logger.error(
-                "Tests failed for %s. No push or PR will be created.",
-                issue_key,
-            )
+        # 6. Persist DEV execution + results from the UI JUnit XML.
+        ui_suite = next(
+            (s for s in test_summary.get("suites", []) if s["suite"] == "UI"),
+            None,
+        )
+        if ui_suite is None:
+            raise RuntimeError("UI suite not found in test summary.")
 
-            try:
-                failure_pr = add_test_failure_comment(
-                    repo=PROJECT_ROOT,
-                    issue_key=issue_key,
-                    branch=prepared["branch"],
-                    base_branch=prepared["base_branch"],
-                    test_summary=test_summary,
-                )
-
-                if failure_pr:
-                    logger.info(
-                        "Failure report posted to existing PR: %s",
-                        failure_pr,
-                    )
-                else:
-                    logger.warning(
-                        "No existing PR found. Failure evidence is saved locally."
-                    )
-
-            except Exception:
-                logger.exception(
-                    "Could not post failure report for %s",
-                    issue_key,
-                )
-
-            return
-
-        # 7. Publish only after requested suites pass.
-        result = publish_tested_branch(
-            issue_key=issue_key,
-            prepared=prepared,
-            test_summary=test_summary,
-            repo_dir=PROJECT_ROOT,
-            summary=ticket.get("summary", ""),
+        counts = parse_junit_counts(
+            Path(test_summary["evidence_dir"]) / "pytest-results.xml"
         )
 
+        script_id = _get_any_script_id(issue_key)
 
-        # 8. Save the Jira snapshot only after successful publication.
-        save_ticket_snapshot(ticket)
+        execution_id = persist_dev_execution(
+            script_id=script_id,
+            execution_status=(
+                "COMPLETED" if ui_suite["status"] == "PASS" else "FAILED"
+            ),
+            framework_name="pytest",
+            execution_type="MANUAL",
+            completed_at=datetime.now(timezone.utc),
+            rollback_status="not_required",
+            error_message=(
+                None
+                if ui_suite["status"] == "PASS"
+                else ui_suite.get("failure_excerpt")
+            ),
+        )
 
+        result_id = persist_dev_execution_results(
+            execution_id=execution_id,
+            total_tests=counts["total"],
+            passed_tests=counts["passed"],
+            failed_tests=counts["failed"],
+            skipped_tests=counts["skipped"],
+            result_status=(
+                "PASS" if ui_suite["status"] == "PASS" else "FAIL"
+            ),
+        )
+
+        # 7. Promotion gate.
+        threshold = float(os.getenv("DEV_PROMOTION_THRESHOLD", "95"))
+        gate = evaluate_promotion_eligibility(
+            execution_id=execution_id,
+            total_tests=counts["total"],
+            passed_tests=counts["passed"],
+            threshold_value=threshold,
+        )
         logger.info(
-            "PR successfully published for %s: %s",
-            issue_key,
-            result["pr_url"],
+            "DEV execution=%s result=%s gate=%s",
+            execution_id, result_id, gate,
+        )
+
+        # 8. Publish only when tests pass.
+        if test_summary.get("overall_status") != "PASS":
+            logger.error(
+                "Tests failed for %s. No push or PR. Evidence: %s",
+                issue_key, test_summary.get("evidence_dir"),
+            )
+            for suite in test_summary.get("suites", []):
+                logger.error(
+                    "%s: %s | log=%s | %s",
+                    suite.get("suite"), suite.get("status"),
+                    suite.get("log"), suite.get("failure_excerpt", ""),
+                )
+            return
+
+        publication = publish_tested_branch(
+            prepared=prepared,
+            test_summary=test_summary,
+            issue_key=issue_key,
+            summary=ticket.get("summary", ""),
+            repo_dir=PROJECT_ROOT,
+        )
+        logger.info(
+            "Automation passed and PR ready for %s: %s",
+            issue_key, publication["pr_url"],
         )
 
     except Exception:
-        logger.exception(
-            "Automation failed for Jira issue %s",
-            issue_key,
-        )
+        logger.exception("Automation failed for Jira issue %s", issue_key)
 
+def _get_any_script_id(issue_key: str) -> int:
+    """Return any dev_generated_scripts.script_id for this issue's test cases."""
+    from sqlalchemy import text
+    from app.db.database import SessionLocal
+
+    with SessionLocal() as db:
+        row = db.execute(
+            text("""
+                SELECT s.script_id
+                FROM dev_generated_scripts s
+                JOIN dev_planner_mapping m
+                  ON m.test_case_id = s.test_case_id
+                 AND m.jira_ticket_id = :issue_key
+                ORDER BY s.script_id
+                LIMIT 1
+            """),
+            {"issue_key": issue_key},
+        ).fetchone()
+
+    if row is None:
+        raise RuntimeError(
+            f"No dev_generated_scripts row found for {issue_key}."
+        )
+    return row[0]
 
 @app.post("/webhook/jira")
 async def jira_webhook(
     request: Request,
     background_tasks: BackgroundTasks,
 ):
-    # Read the exact body Jira signed
     body = await request.body()
 
-    # Get the webhook secret from .env
     secret = os.getenv("JIRA_WEBHOOK_SECRET")
-
-    # Jira signature header
     signature_header = request.headers.get("X-Hub-Signature", "")
 
     if not secret or not signature_header:
@@ -230,10 +310,7 @@ async def jira_webhook(
         hashlib.sha256,
     ).hexdigest()
 
-    if not hmac.compare_digest(
-        expected_signature,
-        received_signature,
-    ):
+    if not hmac.compare_digest(expected_signature, received_signature):
         raise HTTPException(
             status_code=401,
             detail="Invalid webhook signature",
@@ -255,7 +332,6 @@ async def jira_webhook(
             detail="Missing Jira issue key",
         )
 
-    # Acknowledge Jira immediately; generation and tests run afterward.
     background_tasks.add_task(process_jira_issue, issue_key)
 
     return {
