@@ -172,9 +172,7 @@ def process_jira_issue(issue_key):
         junit_path = evidence_dir / "pytest-report.xml"
         if not junit_path.exists():
             junit_path = evidence_dir / "pytest-results.xml"  # fallback
-        counts = parse_junit_counts(
-            Path(test_summary["evidence_dir"]) / "pytest-results.xml"
-            )
+        counts = parse_junit_counts(junit_path)
 
         # 6a. Guard: 0 tests collected = failing run, do not hit the gate.
         if counts["total"] == 0:
