@@ -1,1 +1,0 @@
-Response fields to verify for the login API (e.g., token, user details) are not specified in the provided test case.
