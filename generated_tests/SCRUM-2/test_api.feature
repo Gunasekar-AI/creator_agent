@@ -1,13 +1,12 @@
 Feature: Login API with valid credentials
 
 Background:
-  * url baseUrl
-  * def username = java.lang.System.getenv('TEST_USERNAME')
-  * def password = java.lang.System.getenv('TEST_PASSWORD')
-  * def loginPayload = { username: username, password: password }
+  * def baseUrl = karate.properties['BASE_URL']
+  * def username = karate.properties['TEST_USERNAME']
+  * def password = karate.properties['TEST_PASSWORD']
 
 Scenario: TC-004 Login API with valid credentials
-  Given path '/api/login'
-  And request loginPayload
+  Given url baseUrl + '/api/login'
+  And request { username: '#(username)', password: '#(password)' }
   When method post
   Then status 200
