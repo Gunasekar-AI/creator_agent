@@ -1,31 +1,39 @@
-# 1. Find where sign-in tests live (no full repo scan)
-git grep -l "signin\|sign-in\|login" -- "*test*" "*spec*"
+1) Backe end running cmd
+(venv) PS C:\projects\creator\demo-app> cd .\backend\
+(venv) PS C:\projects\creator\demo-app\backend>  python.exe -m uvicorn main:app --reload --host 127.0.0.1 --port 8001
 
-# 2. Confirm the file's history (optional)
-git log --oneline -- tests/auth/signin.spec.ts
+2) .\venv\Scripts\python.exe -m uvicorn app.webhook:app --host 127.0.0.1 --port 8000
 
-# 3. Find if "forgot password" was ever touched before
-git log -S "forgot password" --oneline
-
-# 4. Open ONLY that file, append the new test case, commit
+-------------------------------------------
 
 
+# 1. Go to project folder
+cd C:\projects\creator
 
+# 2. Activate virtual environment
+.\venv\Scripts\Activate.ps1
 
---------------------
+# 3. Install/check dependencies
+python -m pip install -r requirements.txt
 
+# 4. Check Git status and current branch
+git status
+git branch
 
-JIRA ticket (Test Plan + Test Cases)
-        │ webhook
-        ▼
-Webhook receiver (verify HMAC, ack 200 fast)
-        │ enqueue
-        ▼
-Worker:
-  1. Fetch full ticket (REST API) — webhook payload is thin
-  2. Classify: NEW feature vs EXTENSION
-  3. If EXTENSION → git grep / git log -S → find existing test file
-  4. Build AI prompt (test plan + cases + existing file content if any)
-  5. AI returns test script (diff/append, not full rewrite)
-  6. Write file → git add/commit/push
-  7. Comment commit link back on ticket
+# 5. Start demo application (Terminal 1)
+uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
+
+# 6. Start Jira webhook server (Terminal 2)
+.\venv\Scripts\python.exe -m uvicorn app.webhook:app --host 127.0.0.1 --port 8000
+
+# 7. Run generated UI tests locally (Terminal 3)
+python -m pytest generated_tests/SCRUM-16/test_ui.py -v
+
+# 8. Run all available Python tests
+python -m pytest -v
+
+# 9. Check generated files
+Get-ChildItem generated_tests -Recurse
+
+# 10. Check latest test results
+Get-ChildItem test-results -Recurse
